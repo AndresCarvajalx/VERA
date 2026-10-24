@@ -1,0 +1,6 @@
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+# El modelo se descarga con el script de instalación (ver README)
+vision/models/*.task

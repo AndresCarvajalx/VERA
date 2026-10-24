@@ -1,0 +1,59 @@
+:root {
+  --fondo: #f6f7f9; --panel: #ffffff; --texto: #1d2330; --suave: #667085;
+  --borde: #e4e7ec; --ok: #12805c; --mal: #c4320a; --acento: #2e6be6;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --fondo: #12151b; --panel: #1b2029; --texto: #e8ebf0; --suave: #98a2b3;
+          --borde: #2c3340; --ok: #3ccb8f; --mal: #f97066; --acento: #6f9bff; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; font-family: system-ui, sans-serif; background: var(--fondo); color: var(--texto); }
+header { display: flex; align-items: center; gap: 12px; padding: 16px 24px; }
+h1 { font-size: 1.2rem; margin: 0; }
+h2 { font-size: 1rem; margin: 20px 0 8px; }
+.chip { font-size: .8rem; padding: 4px 10px; border-radius: 99px; border: 1px solid var(--borde); color: var(--suave); }
+.chip.ok { color: var(--ok); border-color: var(--ok); }
+.chip.mal { color: var(--mal); border-color: var(--mal); }
+main { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 24px; padding: 0 24px 24px; }
+@media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+.escena { position: relative; background: var(--panel); border: 1px solid var(--borde); border-radius: 12px; overflow: hidden; }
+canvas { display: block; width: 100%; height: auto; }
+.aviso { position: absolute; left: 50%; top: 16px; transform: translateX(-50%); padding: 8px 14px;
+         border-radius: 8px; background: var(--mal); color: #fff; font-size: .9rem; }
+.aviso.oculto { display: none; }
+aside { background: var(--panel); border: 1px solid var(--borde); border-radius: 12px; padding: 16px; }
+.metricas { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 16px; }
+.metricas div { display: flex; flex-direction: column; }
+.etiqueta { font-size: .75rem; color: var(--suave); }
+.metricas strong { font-size: 1.3rem; font-variant-numeric: tabular-nums; }
+table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--borde); }
+th { font-size: .75rem; color: var(--suave); font-weight: 500; }
+td + td, th + th { text-align: right; }
+.nota { font-size: .8rem; color: var(--suave); }
+.nota.alerta { color: var(--mal); margin-top: 0; }
+.nota.oculto { display: none; }
+.mensaje { margin: 12px 0 0; padding: 8px 10px; border-radius: 8px; font-size: .85rem;
+           border: 1px solid var(--borde); background: var(--fondo); }
+.mensaje.ok { border-color: var(--ok); color: var(--ok); }
+.mensaje.mal { border-color: var(--mal); color: var(--mal); }
+.mensaje.oculto { display: none; }
+button { font: inherit; padding: 6px 12px; border-radius: 8px; border: 1px solid var(--borde);
+         background: var(--fondo); color: var(--texto); cursor: pointer; }
+button[type=submit], #btn_calibrar { background: var(--acento); border-color: var(--acento); color: #fff; }
+.progreso { height: 6px; border-radius: 3px; background: var(--borde); margin-top: 8px; overflow: hidden; }
+.progreso div { height: 100%; width: 0; background: var(--acento); transition: width .1s; }
+.formulario { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: .8rem; color: var(--suave); }
+.formulario label { display: flex; flex-direction: column; gap: 2px; }
+.formulario input, .formulario select { font: inherit; color: var(--texto); background: var(--fondo);
+         border: 1px solid var(--borde); border-radius: 6px; padding: 4px 6px; }
+.botones { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px; }
+.reto { margin-top: 12px; }
+.reto.oculto, #resumen.oculto { display: none; }
+.barra { position: relative; height: 22px; border-radius: 6px; background: var(--borde); overflow: hidden; }
+#barra_amplitud { height: 100%; width: 0; background: var(--suave); }
+#barra_amplitud.en_objetivo { background: var(--ok); }
+#marca_objetivo { position: absolute; top: 0; bottom: 0; width: 3px; background: var(--texto); }
+.reto-datos { display: flex; justify-content: space-between; margin-top: 6px; font-variant-numeric: tabular-nums; }
+#resumen { font-size: .75rem; background: var(--fondo); border-radius: 8px; padding: 8px; max-height: 200px; overflow: auto; }
+#eventos { font-size: .8rem; color: var(--suave); padding-left: 18px; max-height: 160px; overflow: auto; margin: 0; }

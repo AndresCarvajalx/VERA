@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Prueba de visión · AMC</title>
+  <link rel="stylesheet" href="prueba.css">
+</head>
+<body>
+  <header>
+    <h1>Prueba del servicio de visión</h1>
+    <span id="conexion" class="chip">Conectando…</span>
+  </header>
+  <main>
+    <section class="escena">
+      <canvas id="lienzo" width="640" height="480"></canvas>
+      <div id="aviso" class="aviso">Ubícate de cuerpo completo frente a la cámara</div>
+    </section>
+    <aside>
+      <div class="metricas">
+        <div><span class="etiqueta">FPS</span><strong id="fps">–</strong></div>
+        <div><span class="etiqueta">Latencia</span><strong id="latencia">–</strong></div>
+        <div><span class="etiqueta">Encuadre</span><strong id="encuadre">–</strong></div>
+      </div>
+      <p id="aviso_fps" class="nota alerta oculto">Menos de 15 FPS: con poca luz la cámara entrega menos fotogramas. Prueba con luz frontal.</p>
+      <table>
+        <thead><tr><th>Ángulo</th><th>Izq.</th><th>Der.</th></tr></thead>
+        <tbody>
+          <tr><td>Cadera</td><td id="cadera_izq">–</td><td id="cadera_der">–</td></tr>
+          <tr><td>Rodilla</td><td id="rodilla_izq">–</td><td id="rodilla_der">–</td></tr>
+          <tr><td>Tobillo</td><td id="tobillo_izq">–</td><td id="tobillo_der">–</td></tr>
+        </tbody>
+      </table>
+      <p class="nota" id="nota_angulos">Ángulo interior: 180° = pierna extendida. Calibra para ver cuánto te mueves desde tu posición neutra.</p>
+
+      <p id="mensaje" class="mensaje oculto"></p>
+      <h2>1 · Calibrar posición neutra</h2>
+      <p class="nota">Adopta la posición en la que empieza el ejercicio (de pie o sentado) y quédate quieto.</p>
+      <button id="btn_calibrar">Calibrar (quédate quieto 2 s)</button>
+      <div class="progreso"><div id="progreso_calibracion"></div></div>
+
+      <h2>2 · Ejercicio de prueba</h2>
+      <form id="form_ejercicio" class="formulario">
+        <label>Articulación
+          <select name="articulacion"><option value="rodilla">Rodilla</option><option value="cadera">Cadera</option><option value="tobillo">Tobillo</option></select>
+        </label>
+        <label>Lado
+          <select name="lado"><option value="der">Derecho</option><option value="izq">Izquierdo</option></select>
+        </label>
+        <label>Movimiento
+          <select name="sentido"><option value="1">Doblar (flexión)</option><option value="-1">Estirar (extensión)</option></select>
+        </label>
+        <label>Objetivo (° desde la neutra)<input name="objetivo" type="number" value="20" min="5" max="150"></label>
+        <label>Tolerancia (°)<input name="tolerancia" type="number" value="5" min="0" max="30"></label>
+        <label>Sostener (ms)<input name="tiempo_sostenido_ms" type="number" value="500" min="0" step="100"></label>
+        <label>Repeticiones<input name="repeticiones" type="number" value="5" min="1" max="50"></label>
+        <div class="botones">
+          <button type="submit">Iniciar</button>
+          <button type="button" data-comando="pausar">Pausar</button>
+          <button type="button" data-comando="reanudar">Reanudar</button>
+          <button type="button" data-comando="detener">Detener</button>
+        </div>
+      </form>
+      <div id="reto" class="reto oculto">
+        <div class="barra"><div id="barra_amplitud"></div><div id="marca_objetivo"></div></div>
+        <div class="reto-datos">
+          <span id="reto_estado">–</span>
+          <strong id="reto_reps">0 / 0</strong>
+        </div>
+        <p class="nota" id="reto_maximo">Máximo alcanzado: –</p>
+      </div>
+      <pre id="resumen" class="oculto"></pre>
+      <h2>Eventos</h2>
+      <ol id="eventos"></ol>
+    </aside>
+  </main>
+  <script src="prueba.js"></script>
+</body>
+</html>
