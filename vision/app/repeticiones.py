@@ -1,46 +1,41 @@
 """Conteo de repeticiones con máquina de estados e histéresis.
 
-    reposo → subiendo → en_objetivo → bajando → reposo
+    preparacion → reposo → subiendo → en_objetivo → bajando → reposo
 
-Una repetición es válida solo si la amplitud llegó a (objetivo − tolerancia), se
-sostuvo ahí el tiempo indicado y luego el jugador volvió al reposo. Si vuelve al
-reposo sin cumplirlo, la repetición queda como incompleta (no se penaliza).
-Las bandas de histéresis evitan que el temblor del ángulo cuente repeticiones dobles.
+Trabaja sobre un valor `v` que crece hacia la meta: el ángulo clínico en los ejercicios
+"arriba" y el ángulo con signo cambiado en los "abajo" (p. ej. estirar la rodilla).
+
+Repetición efectiva (regla 5): inicio → meta (± tolerancia) → inicio, sostenida el tiempo
+configurado y sin compensaciones activas. Si no, queda incompleta (no se penaliza).
 """
 from dataclasses import dataclass, field
 
-HISTERESIS = 3.0  # grados por debajo del umbral antes de considerar que salió del objetivo
-FRACCION_INICIO = 0.25  # la repetición "empieza" al pasar el 25 % del objetivo
-INICIO_MINIMO = 5.0  # pero nunca con menos de 5°, que es ruido
+HISTERESIS = 3.0  # grados: evita que el temblor alrededor de un umbral cuente doble
 
 
 @dataclass
 class Repeticion:
     numero: int
-    angulo_pico: float
+    angulo_pico: float  # el mejor valor de la repetición, ya como ángulo clínico
     sostenido_ms: int
     valida: bool
+    motivo: str | None  # por qué no fue válida: "no_llego", "no_sostuvo", "compensacion"
 
 
 @dataclass
 class ContadorRepeticiones:
-    objetivo: float  # amplitud meta en grados, relativa a la posición neutra
-    tolerancia: float = 5.0
-    tiempo_sostenido_ms: int = 1000
-    estado: str = "reposo"
+    umbral_meta: float  # v desde el que se considera alcanzada la meta
+    umbral_inicio: float  # v por debajo del cual el jugador está en la posición inicial
+    umbral_arranque: float  # v que hay que alcanzar antes de la primera repetición
+    tiempo_sostenido_ms: int = 0
+    signo: int = 1  # para devolver el pico como ángulo clínico (v = signo · ángulo)
+    estado: str = "preparacion"
     repeticiones: list[Repeticion] = field(default_factory=list)
-    _pico: float = 0.0
+    _pico: float = float("-inf")
     _sostenido_ms: int = 0
     _cumplida: bool = False
+    _compensada: bool = False
     _t_anterior: int | None = None
-
-    @property
-    def umbral_objetivo(self) -> float:
-        return self.objetivo - self.tolerancia
-
-    @property
-    def umbral_inicio(self) -> float:
-        return max(INICIO_MINIMO, self.objetivo * FRACCION_INICIO)
 
     @property
     def validas(self) -> int:
@@ -50,32 +45,38 @@ class ContadorRepeticiones:
     def sostenido_ms(self) -> int:
         return self._sostenido_ms
 
-    def actualizar(self, t_ms: int, amplitud: float | None) -> str | None:
+    def actualizar(self, t_ms: int, v: float | None, compensando: bool = False) -> str | None:
         """Procesa un fotograma. Devuelve "rep_valida", "rep_incompleta" o None."""
-        if amplitud is None:
-            # Fotograma sin confianza: no se avanza ni se cuenta tiempo sostenido.
+        if v is None:
+            # Fotograma descartado: no avanza ni suma tiempo sostenido.
             self._t_anterior = None
             return None
         dt = 0 if self._t_anterior is None else t_ms - self._t_anterior
         self._t_anterior = t_ms
 
+        if self.estado == "preparacion":
+            if v <= self.umbral_arranque:
+                self.estado = "reposo"
+            return None
+
         if self.estado == "reposo":
-            if amplitud > self.umbral_inicio:
-                self._iniciar_repeticion()
-                self.estado = "subiendo"
-            else:
+            if v <= self.umbral_inicio + HISTERESIS:
                 return None
+            self._pico, self._sostenido_ms = float("-inf"), 0
+            self._cumplida = self._compensada = False
+            self.estado = "subiendo"
 
-        self._pico = max(self._pico, amplitud)
+        self._pico = max(self._pico, v)
+        self._compensada = self._compensada or compensando
 
+        if v <= self.umbral_inicio:
+            return self._cerrar()  # volvió al inicio: termina la repetición, cumplida o no
         if self.estado == "subiendo":
-            if amplitud >= self.umbral_objetivo:
+            if v >= self.umbral_meta:
                 self.estado = "en_objetivo"
-            elif amplitud < self.umbral_inicio - HISTERESIS:
-                return self._cerrar()
         elif self.estado == "en_objetivo":
-            if amplitud < self.umbral_objetivo - HISTERESIS:
-                # Si ya sostuvo el tiempo, baja con la repetición cumplida; si no, puede reintentar.
+            if v < self.umbral_meta - HISTERESIS:
+                # Si ya sostuvo el tiempo, vuelve con la meta cumplida; si no, puede reintentar.
                 self.estado = "bajando" if self._cumplida else "subiendo"
                 if not self._cumplida:
                     self._sostenido_ms = 0
@@ -83,18 +84,19 @@ class ContadorRepeticiones:
                 self._sostenido_ms += dt
                 if self._sostenido_ms >= self.tiempo_sostenido_ms:
                     self._cumplida = True
-        elif self.estado == "bajando":
-            if amplitud < self.umbral_inicio - HISTERESIS:
-                return self._cerrar()
         return None
 
-    def _iniciar_repeticion(self) -> None:
-        self._pico = 0.0
-        self._sostenido_ms = 0
-        self._cumplida = False
-
     def _cerrar(self) -> str:
-        rep = Repeticion(len(self.repeticiones) + 1, round(self._pico, 1), self._sostenido_ms, self._cumplida)
+        if self._compensada:
+            motivo = "compensacion"
+        elif self._cumplida:
+            motivo = None
+        elif self._pico >= self.umbral_meta:
+            motivo = "no_sostuvo"
+        else:
+            motivo = "no_llego"
+        rep = Repeticion(len(self.repeticiones) + 1, round(self.signo * self._pico, 1),
+                         self._sostenido_ms, motivo is None, motivo)
         self.repeticiones.append(rep)
         self.estado = "reposo"
         self._sostenido_ms = 0

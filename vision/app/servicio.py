@@ -1,5 +1,7 @@
 """Servicio de visión local: expone los mensajes del bucle de captura por WebSocket.
 
+En el prototipo también monta la API de datos (paquete `api`) bajo /api.
+
 Ejecutar desde la carpeta vision:
     ..\\.venv\\Scripts\\python -m uvicorn app.servicio:app --port 8765
 """
@@ -11,6 +13,9 @@ from pathlib import Path
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
+
+from api import bd as base_datos
+from api.rutas import rutas as rutas_api
 
 from .captura import BucleCaptura
 from .estimador import EstimadorMediaPipe
@@ -58,6 +63,7 @@ bucle: BucleCaptura | None = None
 @asynccontextmanager
 async def ciclo_de_vida(app: FastAPI):
     global bucle
+    base_datos.iniciar()
     difusor.enlazar(asyncio.get_running_loop())
     bucle = BucleCaptura(
         EstimadorMediaPipe(MODELO),
@@ -70,6 +76,7 @@ async def ciclo_de_vida(app: FastAPI):
 
 
 app = FastAPI(title="Servicio de visión AMC", lifespan=ciclo_de_vida)
+app.include_router(rutas_api, prefix="/api")
 
 
 @app.websocket("/ws")

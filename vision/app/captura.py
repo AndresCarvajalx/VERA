@@ -13,9 +13,9 @@ from typing import Callable
 import cv2
 
 from .controlador import Controlador
-from .estimador import EstimadorPose, Landmark
+from .estimador import EstimadorPose, Landmark, Pose
 from .filtros import Antirrebote, FiltroOneEuro
-from .miembro_inferior import INDICES, calcular_angulos, puntos_faltantes
+from .miembro_inferior import INDICES, calcular_angulos, lado_mas_visible, puntos_faltantes, vista
 
 log = logging.getLogger(__name__)
 
@@ -101,7 +101,7 @@ class BucleCaptura:
         self._ancho_pedido, self._alto_pedido = ancho, alto
         self._hilo: threading.Thread | None = None
         self._detener = threading.Event()
-        self._filtros: list[tuple[FiltroOneEuro, FiltroOneEuro, FiltroOneEuro]] = []
+        self._filtros: list[tuple[FiltroOneEuro, ...]] = []
         self._encuadre_anterior: bool | None = None
         self._confianza_anterior: bool | None = None
         self._encuadre_estable = Antirrebote()
@@ -129,13 +129,15 @@ class BucleCaptura:
         if self._hilo:
             self._hilo.join(timeout=3)
 
-    def _suavizar(self, lms: list[Landmark], t: float) -> list[Landmark]:
+    def _suavizar(self, pose: Pose, t: float) -> Pose:
+        """Un filtro One Euro por coordenada: 3 de la imagen y 3 del mundo para cada punto."""
         if not self._filtros:
-            self._filtros = [(FiltroOneEuro(), FiltroOneEuro(), FiltroOneEuro()) for _ in lms]
-        return [
-            Landmark(fx.aplicar(p.x, t), fy.aplicar(p.y, t), fz.aplicar(p.z, t), p.visibilidad)
-            for p, (fx, fy, fz) in zip(lms, self._filtros)
-        ]
+            self._filtros = [tuple(FiltroOneEuro() for _ in range(6)) for _ in pose.landmarks]
+        landmarks, mundo = [], []
+        for p, w, (fx, fy, fz, wx, wy, wz) in zip(pose.landmarks, pose.mundo, self._filtros):
+            landmarks.append(Landmark(fx.aplicar(p.x, t), fy.aplicar(p.y, t), fz.aplicar(p.z, t), p.visibilidad))
+            mundo.append((wx.aplicar(w[0], t), wy.aplicar(w[1], t), wz.aplicar(w[2], t)))
+        return Pose(landmarks, mundo)
 
     def _evento(self, nombre: str, **datos) -> None:
         log.info("Evento %s %s", nombre, datos or "")
@@ -159,24 +161,31 @@ class BucleCaptura:
                     continue
                 secuencia, fotograma, t_captura = dato
                 alto, ancho = fotograma.shape[:2]
-                lms = self._estimador.detectar(fotograma, t_captura)
+                pose = self._estimador.detectar(fotograma, t_captura)
                 del fotograma  # el video nunca sale de aquí
-                self._procesar(lms, t_captura, ancho, alto, fps.marcar(time.perf_counter()))
+                self._procesar(pose, t_captura, ancho, alto, fps.marcar(time.perf_counter()))
         finally:
             lector.cerrar()
             self._estimador.cerrar()
 
-    def _procesar(self, lms: list[Landmark] | None, t_captura: int, ancho: int, alto: int,
-                  fps: float) -> None:
-        if lms is None:
+    def _procesar(self, pose: Pose | None, t_captura: int, ancho: int, alto: int, fps: float) -> None:
+        lms, vista_actual = None, None
+        # Con la cámara de lado solo se exige el lado medido (o, sin ejercicio, el más visible).
+        lado = self._controlador.lado_activo
+        if pose is None:
             self._filtros = []  # al reaparecer la persona no se arrastra la posición vieja
-            encuadre, angulos, salida, faltan = False, {}, [], list(INDICES)
+            encuadre, angulos, salida, mundo = False, {}, [], []
+            faltan = [n for n in INDICES if lado is None or n.endswith(lado)]
         else:
-            lms = self._suavizar(lms, t_captura / 1000)
-            faltan = puntos_faltantes(lms)
+            pose = self._suavizar(pose, t_captura / 1000)
+            lms = pose.landmarks
+            lado = lado or lado_mas_visible(lms)
+            faltan = puntos_faltantes(lms, lado)
             encuadre = not faltan
             angulos = calcular_angulos(lms, ancho, alto)
+            vista_actual = vista(lms, ancho, alto)
             salida = [[round(p.x, 4), round(p.y, 4), round(p.z, 4), round(p.visibilidad, 3)] for p in lms]
+            mundo = [[round(c, 3) for c in w] for w in pose.mundo]
 
         encuadre = self._encuadre_estable.actualizar(encuadre, t_captura)
         if encuadre != self._encuadre_anterior:
@@ -184,13 +193,14 @@ class BucleCaptura:
             if not encuadre:
                 self._evento("fuera_de_encuadre")
         confianza = self._confianza_estable.actualizar(
-            lms is not None and all(v is not None for v in angulos.values()), t_captura)
+            lms is not None and all(angulos.get(f"{a}_{lado}") is not None for a in ("cadera", "rodilla", "tobillo")),
+            t_captura)
         if lms is not None and confianza != self._confianza_anterior:
             self._confianza_anterior = confianza
             if not confianza:
                 self._evento("baja_confianza")
 
-        extra, eventos = self._controlador.procesar(t_captura, angulos, encuadre, fps)
+        extra, eventos = self._controlador.procesar(t_captura, angulos, vista_actual, fps)
         for evento in eventos:
             self._evento(**evento)
 
@@ -202,7 +212,10 @@ class BucleCaptura:
             "imagen": [ancho, alto],
             "encuadre_ok": encuadre,
             "persona": lms is not None,
+            "lado": lado,
+            "vista": vista_actual,
             "faltan": faltan,
             "landmarks": salida,
+            "mundo": mundo,
             "angulos": angulos,
         })

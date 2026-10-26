@@ -8,13 +8,21 @@
 </head>
 <body>
   <header>
-    <h1>Prueba del servicio de visión</h1>
+    <h1>Rehabilitación AMC · prototipo</h1>
     <span id="conexion" class="chip">Conectando…</span>
+    <span id="jugador_actual" class="chip">Sin jugador</span>
   </header>
+  <p class="seguridad">Si sientes dolor o malestar, <strong>detente</strong>. El botón «Detener» siempre está disponible.</p>
   <main>
     <section class="escena">
-      <canvas id="lienzo" width="640" height="480"></canvas>
+      <div id="escena3d" class="escena3d"></div>
+      <div class="rotulo rotulo-guia">Guía · <span id="fase_guia">–</span></div>
+      <div class="rotulo rotulo-jugador">Tú</div>
+      <canvas id="lienzo" class="miniatura" width="640" height="480" title="Esqueleto 2D detectado"></canvas>
       <div id="aviso" class="aviso">Ubícate de cuerpo completo frente a la cámara</div>
+      <div id="aviso_vista" class="aviso aviso-vista oculto"></div>
+      <div id="aviso_compensacion" class="aviso aviso-compensacion oculto"></div>
+      <button type="button" class="detener-flotante" data-comando="detener">Detener</button>
     </section>
     <aside>
       <div class="metricas">
@@ -24,36 +32,52 @@
       </div>
       <p id="aviso_fps" class="nota alerta oculto">Menos de 15 FPS: con poca luz la cámara entrega menos fotogramas. Prueba con luz frontal.</p>
       <table>
-        <thead><tr><th>Ángulo</th><th>Izq.</th><th>Der.</th></tr></thead>
+        <thead><tr><th>Ángulo clínico</th><th>Izq.</th><th>Der.</th></tr></thead>
         <tbody>
-          <tr><td>Cadera</td><td id="cadera_izq">–</td><td id="cadera_der">–</td></tr>
-          <tr><td>Rodilla</td><td id="rodilla_izq">–</td><td id="rodilla_der">–</td></tr>
-          <tr><td>Tobillo</td><td id="tobillo_izq">–</td><td id="tobillo_der">–</td></tr>
+          <tr><td>Cadera (flexión)</td><td id="cadera_izq">–</td><td id="cadera_der">–</td></tr>
+          <tr><td>Rodilla (flexión)</td><td id="rodilla_izq">–</td><td id="rodilla_der">–</td></tr>
+          <tr><td>Tobillo (dorsiflexión)</td><td id="tobillo_izq">–</td><td id="tobillo_der">–</td></tr>
         </tbody>
       </table>
-      <p class="nota" id="nota_angulos">Ángulo interior: 180° = pierna extendida. Calibra para ver cuánto te mueves desde tu posición neutra.</p>
+      <p class="nota">0° = posición anatómica (de pie, pierna recta, planta apoyada).</p>
 
       <p id="mensaje" class="mensaje oculto"></p>
-      <h2>1 · Calibrar posición neutra</h2>
-      <p class="nota">Adopta la posición en la que empieza el ejercicio (de pie o sentado) y quédate quieto.</p>
-      <button id="btn_calibrar">Calibrar (quédate quieto 2 s)</button>
-      <div class="progreso"><div id="progreso_calibracion"></div></div>
 
-      <h2>2 · Ejercicio de prueba</h2>
-      <form id="form_ejercicio" class="formulario">
-        <label>Articulación
-          <select name="articulacion"><option value="rodilla">Rodilla</option><option value="cadera">Cadera</option><option value="tobillo">Tobillo</option></select>
+      <h2>1 · Jugador</h2>
+      <div class="formulario">
+        <label>Código del jugador
+          <select id="sel_jugador"><option value="">— elige —</option></select>
         </label>
-        <label>Lado
-          <select name="lado"><option value="der">Derecho</option><option value="izq">Izquierdo</option></select>
-        </label>
-        <label>Movimiento
-          <select name="sentido"><option value="1">Doblar (flexión)</option><option value="-1">Estirar (extensión)</option></select>
-        </label>
-        <label>Objetivo (° desde la neutra)<input name="objetivo" type="number" value="20" min="5" max="150"></label>
-        <label>Tolerancia (°)<input name="tolerancia" type="number" value="5" min="0" max="30"></label>
-        <label>Sostener (ms)<input name="tiempo_sostenido_ms" type="number" value="500" min="0" step="100"></label>
+        <details class="nuevo-jugador">
+          <summary>Nuevo jugador</summary>
+          <label>Código anónimo (sin nombres)<input id="nuevo_codigo" placeholder="AMC-001" maxlength="20"></label>
+          <label class="casilla"><input type="checkbox" id="nuevo_consentimiento">
+            Firmó el consentimiento informado y autorizó el tratamiento de datos sensibles (v1)</label>
+          <button type="button" id="btn_crear_jugador">Crear</button>
+        </details>
+      </div>
+
+      <h2>2 · Ejercicio</h2>
+      <div class="formulario">
+        <label>Ejercicio<select id="sel_ejercicio"></select></label>
+        <label>Pierna<select id="sel_lado"><option value="der">Derecha</option><option value="izq">Izquierda</option></select></label>
+      </div>
+      <p class="nota" id="descripcion_ejercicio"></p>
+      <p class="nota instruccion" id="instruccion_camara"></p>
+
+      <h2>3 · Evaluar mi rango</h2>
+      <p class="nota">Haz el movimiento lo más que puedas, sin dolor, varias veces durante 15 s. Así medimos desde dónde empiezas.</p>
+      <button type="button" id="btn_evaluar">Evaluar mi rango</button>
+      <div class="progreso"><div id="progreso_evaluacion"></div></div>
+      <p class="nota" id="estado_evaluacion"></p>
+
+      <h2>4 · Jugar</h2>
+      <form id="form_juego" class="formulario">
+        <label>Meta (°)<input name="meta" type="number" step="1"></label>
         <label>Repeticiones<input name="repeticiones" type="number" value="5" min="1" max="50"></label>
+        <label>Sostener (ms)<input name="tiempo_sostenido_ms" type="number" value="0" min="0" step="100"></label>
+        <label>Meta aprobada por<input name="aprobado_por" placeholder="Fisioterapeuta"></label>
+        <p class="nota ancho" id="nota_meta"></p>
         <div class="botones">
           <button type="submit">Iniciar</button>
           <button type="button" data-comando="pausar">Pausar</button>
@@ -67,13 +91,20 @@
           <span id="reto_estado">–</span>
           <strong id="reto_reps">0 / 0</strong>
         </div>
-        <p class="nota" id="reto_maximo">Máximo alcanzado: –</p>
+        <p class="nota" id="reto_maximo">Mejor de la serie: –</p>
       </div>
-      <pre id="resumen" class="oculto"></pre>
+
       <h2>Eventos</h2>
       <ol id="eventos"></ol>
     </aside>
   </main>
-  <script src="prueba.js"></script>
+
+  <section id="progreso" class="progreso-seccion">
+    <h2>Mi progreso</h2>
+    <p class="nota" id="progreso_vacio">Elige un jugador para ver su progreso.</p>
+    <div id="tarjetas_progreso" class="tarjetas"></div>
+  </section>
+  <div id="tooltip" class="tooltip oculto" role="status"></div>
+  <script type="module" src="prueba.js"></script>
 </body>
 </html>

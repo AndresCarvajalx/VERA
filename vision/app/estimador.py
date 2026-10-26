@@ -17,9 +17,17 @@ class Landmark:
     visibilidad: float  # 0–1
 
 
+@dataclass
+class Pose:
+    landmarks: list[Landmark]  # en la imagen: para ángulos, encuadre y el esqueleto 2D
+    # En metros, con origen en el centro de la cadera (x a la derecha de la imagen, y hacia
+    # abajo, z hacia el fondo). Solo se usan para mover el avatar 3D, no para medir.
+    mundo: list[tuple[float, float, float]]
+
+
 class EstimadorPose(Protocol):
-    def detectar(self, fotograma_bgr: np.ndarray, t_ms: int) -> list[Landmark] | None:
-        """Devuelve los 33 landmarks del cuerpo, o None si no hay persona."""
+    def detectar(self, fotograma_bgr: np.ndarray, t_ms: int) -> Pose | None:
+        """Devuelve los 33 puntos del cuerpo, o None si no hay persona."""
         ...
 
     def cerrar(self) -> None: ...
@@ -45,7 +53,7 @@ class EstimadorMediaPipe:
         self._detector = vision.PoseLandmarker.create_from_options(opciones)
         self._ultimo_t = -1
 
-    def detectar(self, fotograma_bgr: np.ndarray, t_ms: int) -> list[Landmark] | None:
+    def detectar(self, fotograma_bgr: np.ndarray, t_ms: int) -> Pose | None:
         import cv2
 
         # El modo VIDEO exige marcas de tiempo estrictamente crecientes.
@@ -56,10 +64,13 @@ class EstimadorMediaPipe:
         resultado = self._detector.detect_for_video(imagen, t_ms)
         if not resultado.pose_landmarks:
             return None
-        return [
-            Landmark(p.x, p.y, p.z, p.visibility if p.visibility is not None else 0.0)
-            for p in resultado.pose_landmarks[0]
-        ]
+        return Pose(
+            landmarks=[
+                Landmark(p.x, p.y, p.z, p.visibility if p.visibility is not None else 0.0)
+                for p in resultado.pose_landmarks[0]
+            ],
+            mundo=[(p.x, p.y, p.z) for p in resultado.pose_world_landmarks[0]],
+        )
 
     def cerrar(self) -> None:
         self._detector.close()

@@ -1,0 +1,58 @@
+{
+  "_fuente": "docs/reglas_rango_movimiento_miembro_inferior.md (Kapandji, 2012). Tolerancias, metas por defecto y umbrales de compensación son decisiones de diseño a validar con un fisioterapeuta.",
+  "tolerancia_medicion": 10,
+  "tolerancia_meta": 5,
+  "visibilidad_minima": 0.6,
+  "salto_maximo": 30,
+  "ejercicios": {
+    "knee_flexion_standing": {
+      "nombre": "Doblar la rodilla de pie",
+      "descripcion": "De pie, lleva el talón hacia el glúteo sin adelantar el muslo.",
+      "articulacion": "rodilla",
+      "posicion": "de_pie",
+      "direccion": "arriba",
+      "inicio_max": 10,
+      "meta_por_defecto": 90,
+      "max_fisiologico": 120,
+      "min_fisiologico": -10,
+      "compensacion": {"angulo": "cadera", "max": 20, "mensaje": "Mantén el muslo vertical"}
+    },
+    "knee_extension_seated": {
+      "nombre": "Estirar la rodilla sentado",
+      "descripcion": "Sentado, estira la pierna hasta dejarla casi recta y vuelve.",
+      "articulacion": "rodilla",
+      "posicion": "sentado",
+      "direccion": "abajo",
+      "inicio_min": 80,
+      "retorno_min": 60,
+      "meta_por_defecto": 10,
+      "max_fisiologico": 140,
+      "min_fisiologico": -10,
+      "compensacion": null
+    },
+    "hip_flexion_standing": {
+      "nombre": "Subir la rodilla de pie",
+      "descripcion": "De pie, sube la rodilla hacia adelante con la pierna doblada.",
+      "articulacion": "cadera",
+      "posicion": "de_pie",
+      "direccion": "arriba",
+      "inicio_max": 10,
+      "meta_por_defecto": 90,
+      "max_fisiologico": 120,
+      "min_fisiologico": -20,
+      "compensacion": {"angulo": "tronco", "max": 15, "mensaje": "Mantén el tronco recto"}
+    },
+    "ankle_dorsiflexion_standing": {
+      "nombre": "Subir la punta del pie",
+      "descripcion": "De pie, apoyado en el talón, sube la punta del pie.",
+      "articulacion": "tobillo",
+      "posicion": "de_pie",
+      "direccion": "arriba",
+      "inicio_max": 5,
+      "meta_por_defecto": 15,
+      "max_fisiologico": 30,
+      "min_fisiologico": -50,
+      "compensacion": {"angulo": "rodilla", "max": 15, "mensaje": "Mantén la rodilla estirada"}
+    }
+  }
+}
