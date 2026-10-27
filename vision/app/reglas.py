@@ -23,6 +23,7 @@ class ReglaEjercicio:
     clave: str
     nombre: str
     descripcion: str
+    posicion_inicial: str  # cómo quedarse quieto en el paso de reposo de la calibración
     articulacion: str  # "rodilla", "cadera" o "tobillo"
     posicion: str  # "de_pie" o "sentado"
     direccion: str  # "arriba": la meta es un ángulo alto; "abajo": la meta es un ángulo bajo
@@ -41,11 +42,36 @@ class ReglaEjercicio:
 
 
 @dataclass(frozen=True)
+class ParametrosCalibracion:
+    reposo_ms: int  # tiempo quieto en la posición inicial para medir el reposo
+    reposo_desviacion_max: float  # grados; si se mueve más, se vuelve a medir el reposo
+    umbral_intento: float  # grados desde el reposo para considerar que empezó un intento
+    sostenido_ms: int  # un pico cuenta solo si se mantuvo este tiempo (descarta picos de ruido)
+    intentos: int  # intentos coherentes necesarios
+    intentos_max: int
+    dispersion_max: float  # grados entre los mejores intentos para considerarlos coherentes
+    tiempo_max_ms: int
+
+
+@dataclass(frozen=True)
+class ParametrosAdaptacion:
+    fraccion_rango: float  # la meta inicial es esta fracción del rango calibrado
+    paso: float  # grados que sube o baja la meta según el desempeño
+    exito_subir: float  # proporción de repeticiones válidas para subir la meta
+    exito_bajar: float  # por debajo de esta proporción la meta baja
+    margen_sobre_calibracion: float  # la meta no supera lo calibrado más este margen
+    repeticiones: int
+    tiempo_sostenido_ms: int
+
+
+@dataclass(frozen=True)
 class Reglas:
     tolerancia_medicion: float
     tolerancia_meta: float
     visibilidad_minima: float
     salto_maximo: float
+    calibracion: ParametrosCalibracion
+    adaptacion: ParametrosAdaptacion
     ejercicios: dict[str, ReglaEjercicio]
 
 
@@ -60,6 +86,7 @@ def cargar(ruta: Path = RUTA) -> Reglas:
             clave=clave,
             nombre=e["nombre"],
             descripcion=e["descripcion"],
+            posicion_inicial=e["posicion_inicial"],
             articulacion=e["articulacion"],
             posicion=e["posicion"],
             direccion=e["direccion"],
@@ -75,5 +102,7 @@ def cargar(ruta: Path = RUTA) -> Reglas:
         tolerancia_meta=datos["tolerancia_meta"],
         visibilidad_minima=datos["visibilidad_minima"],
         salto_maximo=datos["salto_maximo"],
+        calibracion=ParametrosCalibracion(**datos["calibracion"]),
+        adaptacion=ParametrosAdaptacion(**datos["adaptacion"]),
         ejercicios=ejercicios,
     )

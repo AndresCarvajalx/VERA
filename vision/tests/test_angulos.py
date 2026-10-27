@@ -5,7 +5,8 @@ import pytest
 from app.estimador import Landmark
 from app.filtros import Antirrebote, FiltroOneEuro
 from app.geometria import angulo_3p
-from app.miembro_inferior import INDICES, calcular_angulos, encuadre_ok, puntos_faltantes, vista
+from app.miembro_inferior import (INDICES, calcular_angulos, encuadre_ok, hacia_donde_mira, puntos_faltantes,
+                                  vista)
 from tests.cuerpo import ALTO, ANCHO, cuerpo_lateral
 
 
@@ -66,6 +67,40 @@ def test_angulo_usa_pixeles_no_coordenadas_normalizadas():
     a = calcular_angulos(cuerpo_lateral(rodilla=45), ANCHO, ALTO)
     assert a["rodilla_der"] == pytest.approx(45, abs=0.5)
     assert calcular_angulos(cuerpo_lateral(rodilla=45), ALTO, ALTO)["rodilla_der"] != pytest.approx(45, abs=2)
+
+
+def test_cabeza_girada_contra_el_pie_no_decide_la_direccion():
+    # De pie mirando a +x, pero con la cabeza girada hacia la pantalla (nariz hacia −x).
+    lms = cuerpo_lateral(mira=1)
+    nariz = lms[0]
+    lms[0] = Landmark(nariz.x - 30 / ANCHO, nariz.y, nariz.z, nariz.visibilidad)
+    assert hacia_donde_mira(lms, ANCHO) is None
+    assert hacia_donde_mira(cuerpo_lateral(mira=1), ANCHO) == 1
+
+
+def test_direccion_dada_por_quien_llama():
+    # Con la dirección estable de la sesión, un fotograma ambiguo no invierte el signo.
+    lms = cuerpo_lateral(rodilla=90, mira=1)
+    lms[0] = Landmark(lms[0].x - 30 / ANCHO, lms[0].y, lms[0].z, lms[0].visibilidad)
+    assert calcular_angulos(lms, ANCHO, ALTO, mira=1)["rodilla_der"] == pytest.approx(90, abs=0.5)
+    assert calcular_angulos(lms, ANCHO, ALTO, mira=-1)["rodilla_der"] == pytest.approx(-90, abs=0.5)
+
+
+def test_direccion_queda_fija_durante_una_actividad():
+    from app.captura import BucleCaptura
+    bucle = BucleCaptura(estimador=None, publicar=lambda m: None)
+    derecha, izquierda = cuerpo_lateral(mira=1), cuerpo_lateral(mira=-1)
+    t = 0
+    for _ in range(50):
+        t += 40
+        bucle._mira(derecha, ANCHO, t)
+    assert bucle._mira(derecha, ANCHO, t) == 1
+    bucle.enviar_comando({"nombre": "calibrar", "ejercicio": "knee_flexion_standing", "lado": "der"})
+    bucle._atender_comandos()
+    bucle._controlador.actividad.vista_ok = True
+    for _ in range(100):  # 4 s leyendo lo contrario: durante la actividad no cambia
+        t += 40
+        assert bucle._mira(izquierda, ANCHO, t) == 1
 
 
 def test_rodilla_muy_doblada_no_invierte_el_signo():

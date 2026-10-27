@@ -16,7 +16,7 @@
   <main>
     <section class="escena">
       <div id="escena3d" class="escena3d"></div>
-      <div class="rotulo rotulo-guia">Guía · <span id="fase_guia">–</span></div>
+      <div class="rotulo rotulo-guia"><span id="titulo_guia">Guía</span> · <span id="fase_guia">–</span></div>
       <div class="rotulo rotulo-jugador">Tú</div>
       <canvas id="lienzo" class="miniatura" width="640" height="480" title="Esqueleto 2D detectado"></canvas>
       <div id="aviso" class="aviso">Ubícate de cuerpo completo frente a la cámara</div>
@@ -65,26 +65,22 @@
       <p class="nota" id="descripcion_ejercicio"></p>
       <p class="nota instruccion" id="instruccion_camara"></p>
 
-      <h2>3 · Evaluar mi rango</h2>
-      <p class="nota">Haz el movimiento lo más que puedas, sin dolor, varias veces durante 15 s. Así medimos desde dónde empiezas.</p>
-      <button type="button" id="btn_evaluar">Evaluar mi rango</button>
-      <div class="progreso"><div id="progreso_evaluacion"></div></div>
-      <p class="nota" id="estado_evaluacion"></p>
+      <h2>3 · Calibrar</h2>
+      <p class="nota">La guía muestra el rango de una persona sin limitación; tú haz lo que puedas, sin dolor.
+        Primero quédate quieto en la posición inicial y luego haz el movimiento al máximo 3 veces.
+        El juego se adapta solo a lo que midas.</p>
+      <button type="button" id="btn_calibrar">Calibrar</button>
+      <div class="progreso"><div id="progreso_calibracion"></div></div>
+      <p class="nota instruccion" id="estado_calibracion"></p>
 
       <h2>4 · Jugar</h2>
-      <form id="form_juego" class="formulario">
-        <label>Meta (°)<input name="meta" type="number" step="1"></label>
-        <label>Repeticiones<input name="repeticiones" type="number" value="5" min="1" max="50"></label>
-        <label>Sostener (ms)<input name="tiempo_sostenido_ms" type="number" value="0" min="0" step="100"></label>
-        <label>Meta aprobada por<input name="aprobado_por" placeholder="Fisioterapeuta"></label>
-        <p class="nota ancho" id="nota_meta"></p>
-        <div class="botones">
-          <button type="submit">Iniciar</button>
-          <button type="button" data-comando="pausar">Pausar</button>
-          <button type="button" data-comando="reanudar">Reanudar</button>
-          <button type="button" data-comando="detener">Detener</button>
-        </div>
-      </form>
+      <p class="nota" id="plan_juego">Calibra este ejercicio para que el juego calcule tu meta.</p>
+      <div class="botones">
+        <button type="button" id="btn_jugar" class="primario">Jugar</button>
+        <button type="button" data-comando="pausar">Pausar</button>
+        <button type="button" data-comando="reanudar">Reanudar</button>
+        <button type="button" data-comando="detener">Detener</button>
+      </div>
       <div id="reto" class="reto oculto">
         <div class="barra"><div id="barra_amplitud"></div><div id="marca_objetivo"></div></div>
         <div class="reto-datos">

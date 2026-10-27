@@ -35,9 +35,28 @@ Otra base de datos (p. ej. PostgreSQL): variable `BD_URL` con la URL de SQLAlche
 
 1. Elegir o crear el jugador (código anónimo + consentimiento).
 2. Elegir ejercicio y pierna; ponerse **de lado** con esa pierna hacia la cámara (regla 4).
-3. **Evaluar mi rango** (15 s): mide el rango inicial; se guarda como línea base.
-4. **Jugar**: repeticiones contra la meta (por defecto la de las reglas; la aprueba el fisioterapeuta).
-5. Al terminar cada evaluación o serie el resultado se guarda y «Mi progreso» muestra el avance.
+3. **Calibrar** (`vision/app/calibracion.py`): la guía 3D muestra el rango de una persona sin
+   limitación; el jugador queda quieto (reposo) y hace el movimiento al máximo 3 veces. Su rango es la
+   mediana de los picos *sostenidos* (≥ 200 ms) de los intentos, que deben ser coherentes (≤ 8°).
+4. **Jugar**: el jugador no ajusta ningún ángulo. La API calcula la meta (`vision/api/adaptacion.py`):
+   90 % del rango calibrado hoy, sube o baja 3° según las series, sin pasar lo calibrado + 10° ni el
+   límite fisiológico. Si hoy no calibró, «Jugar» calibra primero y arranca el juego solo.
+5. Cada calibración y serie se guarda; «Mi progreso» muestra el rango calibrado de cada sesión.
+
+Parámetros de calibración y adaptación: `config/reglas_rom.json` (decisiones de diseño a validar con
+un fisioterapeuta).
+
+## Precisión de la calibración con datos reales
+
+Cada calibración guarda su traza de ángulos (sin imágenes ni código del jugador) en `data/trazas/`.
+Para medir la repetibilidad y recalcular con los parámetros actuales:
+
+```powershell
+cd vision; ..\.venv\Scripts\python herramientas\analizar_calibraciones.py
+```
+
+Primeras trazas reales (flexión de rodilla de pie, pierna derecha): 116.4° y 113.7°, desviación 1.9°,
+sin signos invertidos; dos de ellas están en `vision/tests/datos/` como pruebas de regresión.
 
 ## Pruebas
 

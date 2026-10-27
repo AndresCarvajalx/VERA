@@ -89,7 +89,7 @@ class ResultadoEjercicio(Base):
     sesion_id: Mapped[int] = mapped_column(ForeignKey("sesion.id"))
     ejercicio_clave: Mapped[str] = mapped_column(ForeignKey("ejercicio.clave"))
     lado: Mapped[str] = mapped_column(String(3))
-    tipo: Mapped[str] = mapped_column(String(12))  # "evaluacion" o "juego"
+    tipo: Mapped[str] = mapped_column(String(12))  # "calibracion" o "juego"
     meta: Mapped[float | None] = mapped_column(Float)
     angulo_max: Mapped[float | None] = mapped_column(Float)
     angulo_min: Mapped[float | None] = mapped_column(Float)
@@ -101,12 +101,16 @@ class ResultadoEjercicio(Base):
     compensaciones: Mapped[int] = mapped_column(Integer, default=0)
     completo: Mapped[bool] = mapped_column(Boolean)
     fps_promedio: Mapped[float | None] = mapped_column(Float)
+    # Calibración: diferencia entre los mejores intentos y si cumplieron la dispersión máxima.
+    dispersion: Mapped[float | None] = mapped_column(Float)
+    consistente: Mapped[bool | None] = mapped_column(Boolean)
     fecha: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=ahora)
     sesion: Mapped[Sesion] = relationship(back_populates="resultados")
     repeticiones: Mapped[list["Repeticion"]] = relationship(back_populates="resultado")
 
 
 class Repeticion(Base):
+    """Una repetición del juego o, en una calibración, un intento (motivo = "intento")."""
     __tablename__ = "repeticion"
     __table_args__ = (UniqueConstraint("resultado_id", "numero"),)
     id: Mapped[int] = mapped_column(primary_key=True)

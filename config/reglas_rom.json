@@ -4,10 +4,32 @@
   "tolerancia_meta": 5,
   "visibilidad_minima": 0.6,
   "salto_maximo": 30,
+  "_calibracion": "Decisiones de diseño (no de la literatura). Mide el rango real del jugador por intentos: reposo quieto, varios intentos máximos y la mediana de los mejores picos sostenidos.",
+  "calibracion": {
+    "reposo_ms": 1000,
+    "reposo_desviacion_max": 3,
+    "umbral_intento": 8,
+    "sostenido_ms": 200,
+    "intentos": 3,
+    "intentos_max": 5,
+    "dispersion_max": 8,
+    "tiempo_max_ms": 45000
+  },
+  "_adaptacion": "Decisiones de diseño. La meta del juego sale de la calibración del jugador y se ajusta según cómo le va; nunca supera el límite fisiológico ni lo que midió la calibración más el margen.",
+  "adaptacion": {
+    "fraccion_rango": 0.9,
+    "paso": 3,
+    "exito_subir": 0.8,
+    "exito_bajar": 0.5,
+    "margen_sobre_calibracion": 10,
+    "repeticiones": 5,
+    "tiempo_sostenido_ms": 0
+  },
   "ejercicios": {
     "knee_flexion_standing": {
       "nombre": "Doblar la rodilla de pie",
       "descripcion": "De pie, lleva el talón hacia el glúteo sin adelantar el muslo.",
+      "posicion_inicial": "de pie, con la pierna recta y el pie apoyado",
       "articulacion": "rodilla",
       "posicion": "de_pie",
       "direccion": "arriba",
@@ -20,6 +42,7 @@
     "knee_extension_seated": {
       "nombre": "Estirar la rodilla sentado",
       "descripcion": "Sentado, estira la pierna hasta dejarla casi recta y vuelve.",
+      "posicion_inicial": "sentado, con la rodilla doblada y el pie en el piso",
       "articulacion": "rodilla",
       "posicion": "sentado",
       "direccion": "abajo",
@@ -33,6 +56,7 @@
     "hip_flexion_standing": {
       "nombre": "Subir la rodilla de pie",
       "descripcion": "De pie, sube la rodilla hacia adelante con la pierna doblada.",
+      "posicion_inicial": "de pie, con las dos piernas rectas",
       "articulacion": "cadera",
       "posicion": "de_pie",
       "direccion": "arriba",
@@ -45,6 +69,7 @@
     "ankle_dorsiflexion_standing": {
       "nombre": "Subir la punta del pie",
       "descripcion": "De pie, apoyado en el talón, sube la punta del pie.",
+      "posicion_inicial": "de pie, con la planta del pie bien apoyada",
       "articulacion": "tobillo",
       "posicion": "de_pie",
       "direccion": "arriba",

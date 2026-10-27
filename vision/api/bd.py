@@ -4,7 +4,7 @@ import os
 from collections.abc import Iterator
 from pathlib import Path
 
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, inspect, select, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -26,10 +26,29 @@ def iniciar(url: str | None = None, **opciones) -> Engine:
         Path(url.removeprefix("sqlite:///")).parent.mkdir(parents=True, exist_ok=True)
     motor = create_engine(url, **opciones)
     Base.metadata.create_all(motor)
+    migrar(motor)
     _fabrica = sessionmaker(motor, expire_on_commit=False)
     with _fabrica() as bd:
         sincronizar_catalogo(bd)
     return motor
+
+
+def migrar(motor: Engine) -> None:
+    """Actualiza una base creada con una versión anterior del prototipo sin perder sus datos.
+
+    create_all no agrega columnas a tablas que ya existen: se agregan aquí las que falten
+    (todas las nuevas admiten nulos). Además, las "evaluaciones" de rango por tiempo fijo de la
+    versión anterior pasan a ser calibraciones; quedan con `consistente` en nulo porque ese
+    método no medía la coherencia entre intentos.
+    """
+    with motor.begin() as conexion:
+        for tabla in Base.metadata.sorted_tables:
+            existentes = {c["name"] for c in inspect(conexion).get_columns(tabla.name)}
+            for columna in tabla.columns:
+                if columna.name not in existentes:
+                    tipo = columna.type.compile(dialect=motor.dialect)
+                    conexion.execute(text(f'ALTER TABLE "{tabla.name}" ADD COLUMN "{columna.name}" {tipo}'))
+        conexion.execute(text("UPDATE resultado_ejercicio SET tipo = 'calibracion' WHERE tipo = 'evaluacion'"))
 
 
 def sincronizar_catalogo(bd: Session) -> None:

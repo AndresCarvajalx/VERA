@@ -79,6 +79,10 @@ export class Escena3D {
     this.jugador.actualizar(pts, visibles);
     const rep = msg.rep;
     const ej = this.ejercicioGuia;
+    if (msg.calibracion) {
+      this.jugador.resaltar(ej.articulacion, ej.lado, msg.calibracion.en_intento ? token("--acento") : token("--resalte"));
+      return;
+    }
     if (!rep) { this.jugador.resaltar(ej.articulacion, ej.lado, null); return; }
     const color = rep.estado === "en_objetivo" || rep.estado === "bajando" ? token("--ok")
       : rep.estado === "subiendo" ? token("--acento") : token("--resalte");
@@ -92,7 +96,7 @@ export class Escena3D {
     this.guia.actualizar(pts);
     this.guia.resaltar(ej.articulacion, ej.lado, fase === "sostén" ? token("--ok") : token("--resalte"));
     this.silla.visible = sentado;
-    this.faseGuia = fase;
+    this.faseGuia = ej.objetivo === 0 ? "quieta" : fase;
     this.renderer.render(this.escena, this.camara);
   }
 }

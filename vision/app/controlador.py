@@ -1,25 +1,28 @@
 """Controlador de la sesión: atiende comandos del navegador y aplica las reglas ROM.
 
 Comandos (navegador → servicio):
-    evaluar_rango     {ejercicio, lado, duracion_ms}
+    calibrar          {ejercicio, lado}
     iniciar_ejercicio {ejercicio, lado, meta, repeticiones, tiempo_sostenido_ms, reposo}
     pausar | reanudar | detener
 
 Eventos (servicio → navegador):
-    vista_ok, evaluacion_lista, evaluacion_fallida, rep_valida, rep_incompleta,
-    compensacion, fuera_de_rango, serie_completa, ejercicio_detenido, comando_rechazado
+    vista_ok, reposo_listo, intento_calibracion, calibracion_lista, calibracion_fallida,
+    rep_valida, rep_incompleta, compensacion, fuera_de_rango, serie_completa,
+    ejercicio_detenido, comando_rechazado
+
+La meta del juego no la escribe el jugador: el navegador la pide a la API de datos, que la
+calcula a partir de la calibración (api/adaptacion.py).
 
 Reglas: config/reglas_rom.json (ver docs/reglas_rango_movimiento_miembro_inferior.md).
 """
 from dataclasses import dataclass, field
 
+from .calibracion import Calibracion
 from .reglas import ReglaEjercicio, cargar
 from .repeticiones import ContadorRepeticiones
 
 LADOS = ("izq", "der")
 VISTA_ESTABLE_MS = 1000  # tiempo de lado y con el lado correcto antes de empezar a medir
-DURACION_EVALUACION_MS = 15000
-MUESTRAS_MINIMAS = 10
 MARGEN_REPOSO = 10  # grados sobre el reposo medido del jugador para considerar que "empezó"
 REPETICIONES_SEGUIDAS_RESINCRONIZAR = 3  # fotogramas coherentes tras un salto para aceptarlo
 
@@ -58,15 +61,15 @@ class FiltroSaltos:
 
 @dataclass
 class Actividad:
-    """Lo que se está haciendo: una evaluación de rango o un ejercicio del juego."""
-    tipo: str  # "evaluacion" o "juego"
+    """Lo que se está haciendo: una calibración o un ejercicio del juego."""
+    tipo: str  # "calibracion" o "juego"
     regla: ReglaEjercicio
     lado: str
     filtro: FiltroSaltos
     meta: float | None = None
     repeticiones_meta: int = 0
     contador: ContadorRepeticiones | None = None
-    duracion_ms: int = DURACION_EVALUACION_MS
+    calibracion: Calibracion | None = None
     vista_desde: int | None = None
     vista_ok: bool = False
     t_inicio: int | None = None
@@ -138,6 +141,8 @@ class Controlador:
         self.reglas = cargar()
         self.actividad: Actividad | None = None
         self.pausado = False
+        # Última calibración terminada, para que el bucle de captura guarde su traza.
+        self.calibracion_terminada: tuple[str, str, Calibracion, dict] | None = None
 
     @property
     def lado_activo(self) -> str | None:
@@ -147,13 +152,14 @@ class Controlador:
     def comando(self, datos: dict) -> list[dict]:
         nombre = datos.get("nombre")
         try:
-            if nombre in ("evaluar_rango", "iniciar_ejercicio"):
+            if nombre in ("calibrar", "iniciar_ejercicio"):
                 eventos = [self._terminar("ejercicio_detenido")] if self.actividad else []
                 regla, lado = _regla_y_lado(datos)
                 filtro = FiltroSaltos(self.reglas.salto_maximo)
-                if nombre == "evaluar_rango":
-                    duracion = int(_numero(datos, "duracion_ms", 3000, 60000, DURACION_EVALUACION_MS))
-                    self.actividad = Actividad("evaluacion", regla, lado, filtro, duracion_ms=duracion)
+                if nombre == "calibrar":
+                    signo = 1 if regla.direccion == "arriba" else -1
+                    self.actividad = Actividad("calibracion", regla, lado, filtro,
+                                               calibracion=Calibracion(self.reglas.calibracion, signo))
                 else:
                     meta = _numero(datos, "meta", -180, 180, regla.meta_por_defecto)
                     if not regla.meta_valida(meta):
@@ -228,16 +234,24 @@ class Controlador:
             if angulo is not None and not compensando:
                 act.angulos.append(angulo)
 
-        # 3. Evaluación de rango o conteo del juego.
-        if act.tipo == "evaluacion":
-            transcurrido = t_ms - act.t_inicio if act.t_inicio is not None else 0
-            extra = {"evaluacion": {
-                **self._comun(act, angulo, activo),
-                "progreso": round(min(1.0, transcurrido / act.duracion_ms), 2),
-            }}
-            if act.vista_ok and transcurrido >= act.duracion_ms:
-                eventos.append(self._terminar("evaluacion_lista"))
-            return extra, eventos
+        # 3. Calibración o conteo del juego.
+        if act.tipo == "calibracion":
+            cal = act.calibracion
+            if activo:
+                antes = (cal.fase, len(cal.picos_v), cal.reanclajes)
+                resultado = cal.actualizar(t_ms, None if compensando else angulo)
+                if (antes[0] == "reposo" and cal.fase == "intentos") or cal.reanclajes > antes[2]:
+                    eventos.append({"nombre": "reposo_listo", "reposo": round(cal.signo * cal.reposo_v, 1),
+                                    "corregido": cal.reanclajes > antes[2]})
+                if len(cal.picos_v) > antes[1]:
+                    eventos.append({"nombre": "intento_calibracion", "numero": len(cal.picos_v),
+                                    "angulo_pico": round(cal.signo * cal.picos_v[-1], 1)})
+                if resultado:
+                    estado_cal, dato = resultado
+                    eventos.append(self._terminar("calibracion_lista") if estado_cal == "lista" else
+                                   self._fallar(dato))
+                    return {}, eventos
+            return {"calibracion": {**self._comun(act, angulo, activo), **cal.estado(t_ms)}}, eventos
 
         if activo:
             v = None if angulo is None else act.contador.signo * angulo
@@ -288,9 +302,6 @@ class Controlador:
         """Cierra la actividad y arma el resumen que el navegador guarda en la base de datos."""
         act = self.actividad
         self.actividad = None
-        if nombre == "evaluacion_lista" and len(act.angulos) < MUESTRAS_MINIMAS:
-            return {"nombre": "evaluacion_fallida", "ejercicio": act.regla.clave, "lado": act.lado,
-                    "motivo": "sin_datos"}
         angulo_max = max(act.angulos) if act.angulos else None
         angulo_min = min(act.angulos) if act.angulos else None
         resumen = {
@@ -305,10 +316,21 @@ class Controlador:
             "reposo": act.reposo(),
             "compensaciones": act.compensaciones,
             "fps_promedio": round(sum(act.fps) / len(act.fps), 1) if act.fps else None,
-            "completo": nombre in ("evaluacion_lista", "serie_completa"),
+            "completo": nombre in ("calibracion_lista", "serie_completa"),
         }
+        if act.calibracion:
+            # El rango calibrado sale de los intentos, no de los extremos sueltos de los fotogramas.
+            cal = act.calibracion
+            resumen.update(cal.resumen() if cal.picos_v else {"mejor": None, "reposo": None})
+            if nombre == "calibracion_lista":
+                self.calibracion_terminada = (act.regla.clave, act.lado, cal, resumen)
         if act.contador:
             resumen["validas"] = act.contador.validas
             resumen["intentadas"] = len(act.contador.repeticiones)
             resumen["repeticiones"] = [vars(r) for r in act.contador.repeticiones]
         return {"nombre": nombre, "resumen": resumen}
+
+    def _fallar(self, motivo: str) -> dict:
+        act = self.actividad
+        self.actividad = None
+        return {"nombre": "calibracion_fallida", "ejercicio": act.regla.clave, "lado": act.lado, "motivo": motivo}

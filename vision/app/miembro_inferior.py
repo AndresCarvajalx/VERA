@@ -79,24 +79,30 @@ def hacia_donde_mira(lms: list[Landmark], ancho: int, umbral: float = UMBRAL_VIS
     Se usa la nariz respecto a las orejas: de perfil siempre apunta hacia adelante. El pie
     no sirve como referencia principal porque al doblar la rodilla más de 90° apunta hacia atrás.
     """
+    senales = set()
     nariz = lms[NARIZ]
     orejas = [lms[i] for i in OREJAS if lms[i].visibilidad >= umbral]
     if nariz.visibilidad >= umbral and orejas:
         dx = (nariz.x - sum(o.x for o in orejas) / len(orejas)) * ancho
         if abs(dx) >= 5:  # pixeles; de frente la nariz queda entre las orejas
-            return 1 if dx > 0 else -1
-    # Respaldo: un pie visible y apoyado de lado (talón → punta casi horizontal).
+            senales.add(1 if dx > 0 else -1)
+    # Un pie apoyado de lado (talón → punta casi horizontal) apunta hacia adelante.
     for lado in LADOS:
         talon, pie = lms[INDICES[f"talon_{lado}"]], lms[INDICES[f"pie_{lado}"]]
         if talon.visibilidad >= umbral and pie.visibilidad >= umbral:
             dx, dy = (pie.x - talon.x) * ancho, (pie.y - talon.y) * ancho
             if abs(dx) > 2 * abs(dy):
-                return 1 if dx > 0 else -1
-    return None
+                senales.add(1 if dx > 0 else -1)
+    # Si la cara y el pie se contradicen (p. ej. el jugador gira la cabeza hacia la pantalla),
+    # no se decide en este fotograma.
+    return senales.pop() if len(senales) == 1 else None
 
 
-def calcular_angulos(lms: list[Landmark], ancho: int, alto: int,
-                     umbral: float = UMBRAL_VISIBILIDAD) -> dict[str, float | None]:
+AUTOMATICO = object()
+
+
+def calcular_angulos(lms: list[Landmark], ancho: int, alto: int, umbral: float = UMBRAL_VISIBILIDAD,
+                     mira=AUTOMATICO) -> dict[str, float | None]:
     """Ángulos clínicos por lado, en grados.
 
     rodilla_*: flexión (0° recta, + doblada, − hiperextensión).
@@ -104,12 +110,14 @@ def calcular_angulos(lms: list[Landmark], ancho: int, alto: int,
     tobillo_*: dorsiflexión (0° planta perpendicular a la pierna, + punta arriba, − flexión plantar).
     tronco_*:  inclinación del tronco respecto a la vertical (sin signo), para compensaciones.
 
-    El signo de rodilla y cadera necesita saber hacia dónde mira el jugador (hacia_donde_mira).
-    Si no se sabe (p. ej. vista frontal), se entrega la magnitud.
+    El signo de rodilla y cadera necesita saber hacia dónde mira el jugador: `mira` (+1/−1) si
+    quien llama ya lo tiene estable, o se estima en este fotograma (hacia_donde_mira). Si no se
+    sabe (p. ej. vista frontal), se entrega la magnitud.
     None cuando alguno de los puntos tiene baja confianza: se descarta, no se inventa (regla 4).
     """
     angulos: dict[str, float | None] = {}
-    mira = hacia_donde_mira(lms, ancho, umbral)
+    if mira is AUTOMATICO:
+        mira = hacia_donde_mira(lms, ancho, umbral)
     for lado in LADOS:
         p = {parte: lms[INDICES[f"{parte}_{lado}"]] for parte in PARTES}
         v = {parte: punto.visibilidad >= umbral for parte, punto in p.items()}

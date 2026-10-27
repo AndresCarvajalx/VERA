@@ -7,7 +7,8 @@ import math
 
 
 class Antirrebote:
-    """Estado booleano que solo cambia si la nueva lectura se mantiene `espera_ms`.
+    """Estado (p. ej. encuadre sí/no, o hacia dónde mira el jugador) que solo cambia si la nueva
+    lectura se mantiene `espera_ms`.
 
     Evita que el aviso de encuadre parpadee (y llene el registro de eventos) cuando un
     punto entra y sale del umbral de visibilidad durante unos pocos fotogramas.
@@ -15,10 +16,10 @@ class Antirrebote:
 
     def __init__(self, espera_ms: int = 300) -> None:
         self.espera_ms = espera_ms
-        self.valor: bool | None = None
+        self.valor = None
         self._desde: int | None = None  # cuándo empezó a leerse un valor distinto
 
-    def actualizar(self, lectura: bool, t_ms: int) -> bool:
+    def actualizar(self, lectura, t_ms: int):
         if self.valor is None:
             self.valor = lectura
         elif lectura == self.valor:

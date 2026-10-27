@@ -49,7 +49,7 @@ td + td, th + th { text-align: right; }
 .mensaje.oculto { display: none; }
 button { font: inherit; padding: 6px 12px; border-radius: 8px; border: 1px solid var(--borde);
          background: var(--fondo); color: var(--texto); cursor: pointer; }
-button[type=submit], #btn_evaluar, #btn_crear_jugador { background: var(--acento); border-color: var(--acento); color: #fff; }
+.primario, #btn_calibrar, #btn_crear_jugador { background: var(--acento); border-color: var(--acento); color: #fff; }
 button[data-comando=detener] { border-color: var(--mal); color: var(--mal); }
 button:disabled { opacity: .5; cursor: not-allowed; }
 .progreso { height: 6px; border-radius: 3px; background: var(--borde); margin-top: 8px; overflow: hidden; }
@@ -87,7 +87,7 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 .grafica .eje { fill: var(--suave); font-size: 11px; }
 .grafica .serie { fill: none; stroke: var(--acento); stroke-width: 2; stroke-linejoin: round; }
 .grafica .punto { fill: var(--acento); stroke: var(--panel); stroke-width: 2; }
-.grafica .punto.evaluacion { fill: var(--panel); stroke: var(--acento); stroke-width: 2; }
+.grafica .punto.inconsistente { fill: var(--panel); stroke: var(--acento); stroke-width: 2; }
 .grafica .referencia { stroke: var(--suave); stroke-width: 1; stroke-dasharray: 4 4; }
 .grafica .rotulo-ref { fill: var(--suave); font-size: 11px; }
 .grafica .zona-hover { fill: transparent; cursor: crosshair; }

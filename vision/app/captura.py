@@ -12,10 +12,12 @@ from typing import Callable
 
 import cv2
 
+from . import trazas
 from .controlador import Controlador
 from .estimador import EstimadorPose, Landmark, Pose
 from .filtros import Antirrebote, FiltroOneEuro
-from .miembro_inferior import INDICES, calcular_angulos, lado_mas_visible, puntos_faltantes, vista
+from .miembro_inferior import (INDICES, calcular_angulos, hacia_donde_mira, lado_mas_visible, puntos_faltantes,
+                               vista)
 
 log = logging.getLogger(__name__)
 
@@ -105,6 +107,9 @@ class BucleCaptura:
         self._encuadre_anterior: bool | None = None
         self._confianza_anterior: bool | None = None
         self._encuadre_estable = Antirrebote()
+        # Hacia dónde mira el jugador (+1/−1): solo cambia si el cambio se mantiene 1.5 s, y no
+        # cambia durante una actividad. Un signo invertido convierte 90° de flexión en −90°.
+        self._mira_estable = Antirrebote(espera_ms=1500)
         self._confianza_estable = Antirrebote()
         # Los comandos llegan desde el hilo del servidor; el controlador solo se toca en este hilo.
         self._comandos: queue.Queue[dict] = queue.Queue()
@@ -138,6 +143,14 @@ class BucleCaptura:
             landmarks.append(Landmark(fx.aplicar(p.x, t), fy.aplicar(p.y, t), fz.aplicar(p.z, t), p.visibilidad))
             mundo.append((wx.aplicar(w[0], t), wy.aplicar(w[1], t), wz.aplicar(w[2], t)))
         return Pose(landmarks, mundo)
+
+    def _mira(self, lms: list[Landmark], ancho: int, t_ms: int) -> int | None:
+        actividad = self._controlador.actividad
+        fija = actividad is not None and actividad.vista_ok and self._mira_estable.valor is not None
+        lectura = hacia_donde_mira(lms, ancho)
+        if not fija and lectura is not None:
+            self._mira_estable.actualizar(lectura, t_ms)
+        return self._mira_estable.valor
 
     def _evento(self, nombre: str, **datos) -> None:
         log.info("Evento %s %s", nombre, datos or "")
@@ -182,7 +195,7 @@ class BucleCaptura:
             lado = lado or lado_mas_visible(lms)
             faltan = puntos_faltantes(lms, lado)
             encuadre = not faltan
-            angulos = calcular_angulos(lms, ancho, alto)
+            angulos = calcular_angulos(lms, ancho, alto, mira=self._mira(lms, ancho, t_captura))
             vista_actual = vista(lms, ancho, alto)
             salida = [[round(p.x, 4), round(p.y, 4), round(p.z, 4), round(p.visibilidad, 3)] for p in lms]
             mundo = [[round(c, 3) for c in w] for w in pose.mundo]
@@ -203,6 +216,13 @@ class BucleCaptura:
         extra, eventos = self._controlador.procesar(t_captura, angulos, vista_actual, fps)
         for evento in eventos:
             self._evento(**evento)
+        if self._controlador.calibracion_terminada:
+            ejercicio, lado, cal, resumen = self._controlador.calibracion_terminada
+            self._controlador.calibracion_terminada = None
+            try:
+                log.info("Traza de calibración guardada en %s", trazas.guardar(ejercicio, lado, cal.traza, resumen))
+            except OSError:
+                log.exception("No se pudo guardar la traza de calibración")
 
         self._publicar({
             **extra,

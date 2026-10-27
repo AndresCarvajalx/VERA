@@ -26,7 +26,10 @@ const $ = (id) => document.getElementById(id);
 const lienzo = $("lienzo");
 const ctx = lienzo.getContext("2d");
 const latencias = [];
-const estado = { ejercicios: {}, jugador: null, objetivos: [], progreso: [], sesionId: null, latenciaSuma: 0, latenciaN: 0 };
+const estado = {
+  ejercicios: {}, jugador: null, progreso: [], plan: null, sesionId: null, pasoGuia: null, finActividad: 0,
+  jugarTrasCalibrar: false, latenciaSuma: 0, latenciaN: 0,
+};
 
 function color(nombre) {
   return getComputedStyle(document.documentElement).getPropertyValue(nombre).trim();
@@ -102,17 +105,39 @@ function actualizarPanel(msg) {
     const v = msg.angulos[clave];
     $(clave).textContent = v == null ? "–" : `${v.toFixed(0)}°`;
   }
-  const actividad = msg.evaluacion ?? msg.rep;
+  const actividad = msg.calibracion ?? msg.rep;
   actualizarVista(msg, actividad);
   $("aviso_compensacion").classList.toggle("oculto", !actividad?.compensacion);
   if (actividad?.compensacion) $("aviso_compensacion").textContent = actividad.compensacion;
-  if (msg.evaluacion) {
-    $("progreso_evaluacion").style.width = `${msg.evaluacion.progreso * 100}%`;
-    const mejor = msg.evaluacion.mejor == null ? "–" : `${msg.evaluacion.mejor.toFixed(0)}°`;
-    $("estado_evaluacion").textContent = msg.evaluacion.fase === "verificando_vista"
-      ? "Esperando a verte de lado…" : `Midiendo… tu mejor ángulo hasta ahora: ${mejor}`;
-  }
+  // Un fotograma capturado antes de que la calibración terminara puede dibujarse después del
+  // evento de fin: se ignora para no reactivar la guía de calibración.
+  if (msg.calibracion && msg.t_captura > estado.finActividad) actualizarCalibracion(msg.calibracion);
   actualizarReto(msg.rep);
+}
+
+function actualizarCalibracion(c) {
+  $("progreso_calibracion").style.width = `${c.progreso * 100}%`;
+  // Mientras se mide el reposo la guía queda quieta en la posición inicial: si se mueve, el
+  // jugador tiende a imitarla y empieza ya doblado (pasó en una calibración real).
+  const pasoGuia = c.fase === "verificando_vista" || c.paso === "reposo" ? "inicial" : "normal";
+  if (estado.pasoGuia !== pasoGuia) {
+    estado.pasoGuia = pasoGuia;
+    mostrarGuia(pasoGuia);
+  }
+  const angulo = c.angulo == null ? "" : ` · ahora ${c.angulo.toFixed(0)}°`;
+  const inicial = seleccion().regla?.posicion_inicial ?? "en la posición inicial";
+  let texto;
+  if (c.fase === "verificando_vista") texto = `Ponte de lado, ${inicial}…`;
+  else if (c.fase === "pausado") texto = "Calibración en pausa.";
+  else if (c.paso === "reposo") texto = `Paso 1: quédate quieto ${inicial}${angulo}`;
+  else {
+    const n = Math.min(c.intentos + 1, c.intentos_necesarios);
+    const hechos = c.picos.length ? ` · tus intentos: ${c.picos.map((p) => `${p.toFixed(0)}°`).join(", ")}` : "";
+    texto = c.en_intento
+      ? `Intento ${n}: ¡más! Mantén el máximo un momento${c.pico_actual == null ? "" : ` (${c.pico_actual.toFixed(0)}°)`}`
+      : `Paso 2: intento ${n} de ${c.intentos_necesarios} — haz el movimiento lo más que puedas${hechos}`;
+  }
+  $("estado_calibracion").textContent = texto;
 }
 
 function actualizarVista(msg, actividad) {
@@ -160,52 +185,71 @@ function mostrarMensaje(texto, tipo = "") {
   m.className = `mensaje ${tipo}`;
 }
 
-// --- jugador, ejercicio y metas -----------------------------------------------
+// --- jugador, ejercicio y plan adaptado ---------------------------------------
 function seleccion() {
   const clave = $("sel_ejercicio").value;
   return { clave, regla: estado.ejercicios[clave], lado: $("sel_lado").value };
 }
 
-function objetivoVigente(clave, lado) {
-  return estado.objetivos.find((o) => o.ejercicio === clave && o.lado === lado);
-}
-
-function ultimaEvaluacion(clave, lado) {
-  const serie = estado.progreso.find((s) => s.ejercicio === clave && s.lado === lado);
-  return serie?.puntos.filter((p) => p.tipo === "evaluacion").at(-1);
+/** Rango de una persona sin limitación (reglas): techo en "arriba", pierna recta en "abajo". */
+function rangoNormal(regla) {
+  return regla.direccion === "arriba" ? regla.max_fisiologico : 0;
 }
 
 function actualizarEjercicio() {
-  const { clave, regla, lado } = seleccion();
+  const { regla, lado } = seleccion();
   if (!regla) return;
   $("descripcion_ejercicio").textContent = regla.descripcion;
   $("instruccion_camara").textContent =
     `Posición: ${POSICION[regla.posicion]}. Ponte de lado, con tu pierna ${LADOS[lado]} hacia la cámara.`;
-  const objetivo = objetivoVigente(clave, lado);
-  const form = $("form_juego");
-  form.meta.value = objetivo?.meta ?? regla.meta_por_defecto;
-  if (objetivo) {
-    form.repeticiones.value = objetivo.repeticiones;
-    form.tiempo_sostenido_ms.value = objetivo.tiempo_sostenido_ms;
-    form.aprobado_por.value = objetivo.aprobado_por;
-  }
-  const limite = regla.direccion === "arriba" ? `máximo ${regla.max_fisiologico}°` : `mínimo ${regla.min_fisiologico}°`;
-  $("nota_meta").textContent = (objetivo ? `Meta aprobada por ${objetivo.aprobado_por}. ` :
-    `Meta por defecto de las reglas (${regla.meta_por_defecto}°): debe definirla el fisioterapeuta. `) +
-    `Límite de referencia: ${limite}.` + (regla.direccion === "abajo" ? " Aquí la meta es un ángulo bajo: 0° = pierna recta." : "");
-  mostrarGuia();
+  estado.plan = null;
+  mostrarGuia("normal");
+  cargarPlan();
 }
 
-function mostrarGuia() {
+/**
+ * La guía demuestra el rango normal mientras no hay plan (y durante la calibración), y la meta
+ * adaptada del jugador cuando la hay.
+ */
+function mostrarGuia(modo) {
   const { clave, regla, lado } = seleccion();
   if (!regla) return;
-  const meta = Number($("form_juego").meta.value) || regla.meta_por_defecto;
+  const usarMeta = modo === "meta" && estado.plan && !estado.plan.requiere_calibracion;
+  const angulo = usarMeta ? estado.plan.meta : rangoNormal(regla);
+  $("titulo_guia").textContent = modo === "inicial" ? "Guía · posición inicial"
+    : usarMeta ? `Guía · tu meta ${angulo}°` : `Guía · rango normal ${angulo}°`;
   escena.mostrarEjercicio({
     ...GUIA[clave], lado,
-    // La guía sentada parte de 90° de flexión y estira hasta la meta.
-    objetivo: regla.direccion === "arriba" ? meta : Math.max(0, 90 - meta),
-    tiempo_sostenido_ms: Math.max(800, Number($("form_juego").tiempo_sostenido_ms.value) || 0),
+    // La guía sentada parte de 90° de flexión y estira hasta el ángulo indicado; 0 = quieta.
+    objetivo: modo === "inicial" ? 0 : regla.direccion === "arriba" ? angulo : Math.max(0, 90 - angulo),
+    tiempo_sostenido_ms: 1000,
   });
+}
+
+async function cargarPlan() {
+  const { clave, regla, lado } = seleccion();
+  if (!estado.jugador || !regla) {
+    $("plan_juego").textContent = "Elige un jugador para que el juego se adapte a su rango.";
+    return null;
+  }
+  const params = new URLSearchParams({ ejercicio: clave, lado });
+  if (estado.sesionId) params.set("sesion", estado.sesionId);
+  const plan = await api("GET", `/pacientes/${encodeURIComponent(estado.jugador)}/plan?${params}`);
+  estado.plan = plan;
+  if (plan.requiere_calibracion) {
+    $("plan_juego").textContent = "Aún no calibras este ejercicio hoy. Al pulsar «Jugar» primero se calibra.";
+    mostrarGuia("normal");
+    return plan;
+  }
+  const normal = `${plan.referencia}°`;
+  const origen = plan.origen === "fisioterapeuta" ? "fijada por tu fisioterapeuta"
+    : `${Math.round(100 * plan.fraccion_rango)} % de tu rango de hoy${plan.ajuste ? ` ${plan.ajuste > 0 ? "+" : ""}${plan.ajuste}° por cómo te ha ido` : ""}`;
+  $("plan_juego").textContent = plan.jugable
+    ? `Tu rango hoy: de ${plan.reposo}° a ${plan.calibrado}° (normal: ${normal}). Meta del juego: ${plan.meta}°, ${origen}. ` +
+      `${plan.repeticiones} repeticiones.` + (plan.calibracion.consistente ? "" : " Tus intentos variaron mucho: si puedes, vuelve a calibrar.")
+    : `Tu rango hoy (${plan.reposo}°–${plan.calibrado}°) es muy pequeño para contar repeticiones con fiabilidad. Coméntalo con tu fisioterapeuta.`;
+  mostrarGuia("meta");
+  return plan;
 }
 
 async function cargarJugadores(seleccionar) {
@@ -220,19 +264,14 @@ async function cargarJugadores(seleccionar) {
 }
 
 async function elegirJugador(codigo) {
+  cerrarSesion();
   estado.jugador = codigo || null;
-  estado.sesionId = null; // cada jugador tiene su propia sesión
+  estado.sesionId = null; // cada jugador tiene su propia sesión (y debe calibrar en ella)
   $("jugador_actual").textContent = codigo ? `Jugador ${codigo}` : "Sin jugador";
   $("jugador_actual").className = codigo ? "chip ok" : "chip";
-  if (!codigo) {
-    estado.objetivos = []; estado.progreso = [];
-    pintarProgreso();
-    return;
-  }
-  recordar("jugador", codigo);
-  const datos = await api("GET", `/pacientes/${encodeURIComponent(codigo)}`);
-  estado.objetivos = datos.objetivos;
-  await cargarProgreso();
+  if (codigo) recordar("jugador", codigo);
+  estado.progreso = codigo ? await api("GET", `/pacientes/${encodeURIComponent(codigo)}/progreso`) : [];
+  pintarProgreso();
   actualizarEjercicio();
 }
 
@@ -244,7 +283,7 @@ async function cargarProgreso() {
 
 function pintarProgreso() {
   const vacio = !estado.jugador ? "Elige un jugador para ver su progreso."
-    : !estado.progreso.length ? "Todavía no hay resultados guardados. Empieza con «Evaluar mi rango»." : "";
+    : !estado.progreso.length ? "Todavía no hay calibraciones guardadas. Empieza con «Calibrar» o «Jugar»." : "";
   $("progreso_vacio").textContent = vacio;
   $("progreso_vacio").classList.toggle("oculto", !vacio);
   dibujarProgreso($("tarjetas_progreso"), estado.progreso, $("tooltip"));
@@ -261,6 +300,7 @@ async function guardarResumen(resumen) {
     }
     await api("POST", `/sesiones/${estado.sesionId}/resultados`, resumen);
     await cargarProgreso();
+    await cargarPlan();
     return true;
   } catch (e) {
     mostrarMensaje(`No se pudo guardar: ${e.message}`, "mal");
@@ -269,7 +309,7 @@ async function guardarResumen(resumen) {
 }
 
 function cerrarSesion() {
-  if (!estado.sesionId) return;
+  if (!estado.sesionId || !estado.jugador) return;
   const latencia = estado.latenciaN ? estado.latenciaSuma / estado.latenciaN : null;
   fetch(`/api/sesiones/${estado.sesionId}`, {
     method: "PATCH", keepalive: true, headers: { "Content-Type": "application/json" },
@@ -297,7 +337,6 @@ const escena = new Escena3D($("escena3d"));
 $("sel_jugador").addEventListener("change", (e) => elegirJugador(e.target.value).catch((err) => mostrarMensaje(err.message, "mal")));
 $("sel_ejercicio").addEventListener("change", actualizarEjercicio);
 $("sel_lado").addEventListener("change", actualizarEjercicio);
-$("form_juego").addEventListener("input", mostrarGuia);
 
 $("btn_crear_jugador").addEventListener("click", async () => {
   const codigo = $("nuevo_codigo").value.trim().toUpperCase();
@@ -317,37 +356,48 @@ $("btn_crear_jugador").addEventListener("click", async () => {
   }
 });
 
-$("btn_evaluar").addEventListener("click", () => {
+function calibrar() {
   if (!requiereJugador()) return;
   const { clave, lado } = seleccion();
-  mostrarMensaje("Evaluando tu rango: ponte de lado y haz el movimiento lo más que puedas, sin dolor.");
-  $("estado_evaluacion").textContent = "Esperando a verte de lado…";
-  enviar("evaluar_rango", { ejercicio: clave, lado, duracion_ms: 15000 });
-});
+  // La guía espera quieta en la posición inicial; en los intentos muestra el rango normal.
+  estado.pasoGuia = "inicial";
+  mostrarGuia("inicial");
+  const inicial = seleccion().regla.posicion_inicial;
+  mostrarMensaje(`Calibración: ponte de lado, ${inicial}. Luego la guía te mostrará el rango normal; tú haz lo que puedas, sin dolor.`);
+  $("estado_calibracion").textContent = `Ponte de lado, ${inicial}…`;
+  enviar("calibrar", { ejercicio: clave, lado });
+}
 
-$("form_juego").addEventListener("submit", async (e) => {
-  e.preventDefault();
+/** El jugador no ajusta ángulos: la meta y la dosificación vienen del plan adaptado. */
+async function jugar() {
   if (!requiereJugador()) return;
-  const { clave, lado } = seleccion();
-  const f = e.target;
-  const datos = {
-    ejercicio: clave, lado, meta: Number(f.meta.value), repeticiones: Number(f.repeticiones.value),
-    tiempo_sostenido_ms: Number(f.tiempo_sostenido_ms.value),
-  };
-  const aprobado = f.aprobado_por.value.trim();
-  if (aprobado) {
-    try {
-      const objetivo = await api("PUT", `/pacientes/${encodeURIComponent(estado.jugador)}/objetivos`, { ...datos, aprobado_por: aprobado });
-      estado.objetivos = [...estado.objetivos.filter((o) => !(o.ejercicio === clave && o.lado === lado)), objetivo];
-    } catch (err) {
-      mostrarMensaje(err.message, "mal");
-      return;
-    }
+  let plan;
+  try {
+    plan = await cargarPlan();
+  } catch (e) {
+    mostrarMensaje(e.message, "mal");
+    return;
   }
-  const evaluacion = ultimaEvaluacion(clave, lado);
-  mostrarGuia();
-  enviar("iniciar_ejercicio", { ...datos, reposo: evaluacion?.reposo ?? null });
-});
+  if (plan.requiere_calibracion) {
+    estado.jugarTrasCalibrar = true;
+    calibrar();
+    return;
+  }
+  if (!plan.jugable) {
+    mostrarMensaje("Tu rango de hoy es muy pequeño para este ejercicio. Coméntalo con tu fisioterapeuta.", "mal");
+    return;
+  }
+  const { clave, lado } = seleccion();
+  mostrarGuia("meta");
+  mostrarMensaje(`¡A jugar! Tu meta es ${plan.meta}°.`, "ok");
+  enviar("iniciar_ejercicio", {
+    ejercicio: clave, lado, meta: plan.meta, repeticiones: plan.repeticiones,
+    tiempo_sostenido_ms: plan.tiempo_sostenido_ms, reposo: plan.reposo,
+  });
+}
+
+$("btn_calibrar").addEventListener("click", () => { estado.jugarTrasCalibrar = false; calibrar(); });
+$("btn_jugar").addEventListener("click", jugar);
 
 for (const boton of document.querySelectorAll("[data-comando]")) {
   boton.addEventListener("click", () => enviar(boton.dataset.comando));
@@ -356,8 +406,11 @@ for (const boton of document.querySelectorAll("[data-comando]")) {
 // --- eventos del servicio -----------------------------------------------------------
 const MOTIVOS_REP = { no_llego: "no llegaste a la meta", no_sostuvo: "no sostuviste el tiempo", compensacion: "hubo compensación" };
 
+const FIN_DE_ACTIVIDAD = new Set(["calibracion_lista", "calibracion_fallida", "serie_completa", "ejercicio_detenido"]);
+
 async function manejarEvento(msg) {
   registrarEvento(msg);
+  if (FIN_DE_ACTIVIDAD.has(msg.nombre)) estado.finActividad = msg.t;
   switch (msg.nombre) {
     case "vista_ok":
       mostrarMensaje("¡Bien! Ya te veo de lado. Empieza.", "ok");
@@ -374,27 +427,63 @@ async function manejarEvento(msg) {
     case "rep_incompleta":
       mostrarMensaje(`Repetición incompleta (${MOTIVOS_REP[msg.motivo] ?? msg.motivo}): llegaste a ${msg.angulo_pico}°. ¡Sigue!`);
       break;
-    case "evaluacion_fallida":
-      $("progreso_evaluacion").style.width = "0";
-      $("estado_evaluacion").textContent = "";
-      mostrarMensaje("No pude medir tu rango: no se vio bien la pierna. Revisa la luz y el encuadre e inténtalo otra vez.", "mal");
+    case "reposo_listo":
+      mostrarMensaje(msg.corregido
+        ? `Corregí tu posición inicial a ${msg.reposo}°. Sigue haciendo el movimiento al máximo.`
+        : `Posición inicial registrada (${msg.reposo}°). Ahora haz el movimiento lo más que puedas.`, "ok");
       break;
-    case "evaluacion_lista": {
+    case "intento_calibracion":
+      mostrarMensaje(`Intento ${msg.numero}: ${msg.angulo_pico}°. Vuelve a la posición inicial y repite.`, "ok");
+      break;
+    case "calibracion_fallida": {
+      estado.jugarTrasCalibrar = false;
+      estado.pasoGuia = null;
+      mostrarGuia("normal");
+      $("progreso_calibracion").style.width = "0";
+      $("estado_calibracion").textContent = "";
+      const motivo = msg.motivo === "sin_reposo"
+        ? "no pudiste quedarte quieto en la posición inicial (o no se vio bien la pierna)"
+        : "no se registró ningún intento completo";
+      mostrarMensaje(`No pude calibrar: ${motivo}. Revisa la luz y el encuadre e inténtalo otra vez.`, "mal");
+      break;
+    }
+    case "calibracion_lista": {
       const r = msg.resumen;
-      $("progreso_evaluacion").style.width = "0";
-      $("estado_evaluacion").textContent = `Tu rango: de ${r.reposo}° a ${r.mejor}°.`;
-      if (await guardarResumen(r)) mostrarMensaje(`Rango medido y guardado: llegaste a ${r.mejor}°.`, "ok");
+      estado.pasoGuia = null;
+      $("progreso_calibracion").style.width = "0";
+      $("estado_calibracion").textContent =
+        `Tu rango hoy: de ${r.reposo}° a ${r.mejor}° (intentos: ${r.intentos.map((p) => `${p}°`).join(", ")}).`;
+      if (!(await guardarResumen(r))) {
+        estado.jugarTrasCalibrar = false;
+        break;
+      }
+      mostrarMensaje(`Calibración guardada: tu rango es de ${r.reposo}° a ${r.mejor}°.` +
+        (r.consistente ? "" : " Tus intentos variaron mucho; puedes repetir la calibración."), "ok");
+      if (estado.jugarTrasCalibrar) {
+        estado.jugarTrasCalibrar = false;
+        setTimeout(jugar, 2500); // un respiro antes de empezar la serie
+      }
       break;
     }
     case "serie_completa":
     case "ejercicio_detenido": {
       const r = msg.resumen;
-      const guardar = r.tipo === "juego" || r.completo; // una evaluación interrumpida no es una línea base
-      const texto = msg.nombre === "serie_completa" ? "¡Serie completa!" : "Ejercicio detenido.";
-      if (guardar && r.mejor != null) {
-        if (await guardarResumen(r)) mostrarMensaje(`${texto} Resultado guardado: mejor ${r.mejor}°.`, "ok");
-      } else {
+      // Una calibración interrumpida no es una medida de rango: no se guarda.
+      const guardar = r.tipo === "juego" && r.mejor != null;
+      const texto = msg.nombre === "serie_completa" ? "¡Serie completa!" : "Detenido.";
+      if (!guardar) {
+        estado.jugarTrasCalibrar = false;
+        estado.pasoGuia = null;
+        mostrarGuia(estado.plan && !estado.plan.requiere_calibracion ? "meta" : "normal");
         mostrarMensaje(`${texto} No había medidas para guardar.`);
+        break;
+      }
+      const metaAnterior = r.meta;
+      if (await guardarResumen(r)) {
+        const nueva = estado.plan?.meta;
+        const cambio = nueva == null || nueva === metaAnterior ? ""
+          : ` Tu próxima meta: ${nueva}° (${(estado.plan.direccion === "arriba" ? nueva > metaAnterior : nueva < metaAnterior) ? "sube" : "baja"} según cómo te fue).`;
+        mostrarMensaje(`${texto} ${r.validas} de ${r.intentadas} repeticiones válidas.${cambio}`, "ok");
       }
       break;
     }
