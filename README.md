@@ -46,6 +46,22 @@ Otra base de datos (p. ej. PostgreSQL): variable `BD_URL` con la URL de SQLAlche
 Parámetros de calibración y adaptación: `config/reglas_rom.json` (decisiones de diseño a validar con
 un fisioterapeuta).
 
+## Personaje 3D: el toribara
+
+`modelado/generar_toribara.py` construye en Blender el personaje (toro + capibara, de pie en dos
+patas), su esqueleto, las vendas de cada pierna y la banda del guía; guarda `modelado/toribara.blend`
+para retocarlo a mano y exporta `web/modelos/toribara.glb`, que carga el juego (`web/toribara.js`).
+
+```powershell
+& "D:\steam\steamapps\common\Blender\blender.exe" --background --factory-startup --python modelado\generar_toribara.py
+```
+
+Si se retoca el `.blend`, se exporta de nuevo a `web/modelos/toribara.glb` (glTF binario) conservando
+los nombres de huesos, de objetos `venda_*` / `banda_entrenador` y de materiales `pelaje_pierna_*`:
+el juego depende de ellos. La pierna del jugador muestra una de cuatro etapas según su rango
+calibrado frente al normal: vendada (< 40 %), quitándose la venda (< 70 %), fortaleciéndose (< 90 %)
+y en plena forma.
+
 ## Precisión de la calibración con datos reales
 
 Cada calibración guarda su traza de ángulos (sin imágenes ni código del jugador) en `data/trazas/`.

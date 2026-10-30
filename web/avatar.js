@@ -42,8 +42,10 @@ export class Avatar {
     this.colorBase = new THREE.Color(color);
     this.opacidad = opacidad;
     // Transparente siempre: las partes que la cámara no ve se dibujan translúcidas.
+    // Un leve brillo propio del mismo color hace que el avatar resalte sobre el escenario oscuro.
     const material = () => new THREE.MeshStandardMaterial({
-      color: this.colorBase, roughness: 0.55, metalness: 0.05, transparent: true, opacity: opacidad,
+      color: this.colorBase, emissive: this.colorBase, emissiveIntensity: 0.18,
+      roughness: 0.4, metalness: 0.1, transparent: true, opacity: opacidad,
     });
     const cilindro = new THREE.CylinderGeometry(1, 1, 1, 16);
     const esfera = new THREE.SphereGeometry(1, 16, 12);
@@ -104,6 +106,7 @@ export class Avatar {
     for (const malla of this.huesos) {
       const activo = color && prefijos.includes(malla.userData.nombre);
       malla.material.color.set(activo ? color : this.colorBase);
+      malla.material.emissive.set(activo ? color : this.colorBase);
     }
   }
 }

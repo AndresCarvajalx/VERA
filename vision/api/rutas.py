@@ -1,5 +1,6 @@
 """Rutas REST de la API de datos: catálogo, jugadores, metas, sesiones, resultados y progreso."""
 import re
+import statistics
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -11,8 +12,8 @@ from app.reglas import cargar
 
 from .adaptacion import Serie, calcular_plan
 from .bd import sesion_bd
-from .modelos import (Consentimiento, Ejercicio, ObjetivoAngular, Paciente, Repeticion, ResultadoEjercicio,
-                      Sesion, ahora)
+from .modelos import (Consentimiento, Ejercicio, MedicionReferencia, ObjetivoAngular, Paciente, Repeticion,
+                      ResultadoEjercicio, Sesion, ahora)
 
 rutas = APIRouter()
 CODIGO = re.compile(r"^[A-Za-z0-9-]{3,20}$")
@@ -232,6 +233,65 @@ def _meta_fisioterapeuta(bd: Session, paciente_id: int, ejercicio: str, lado: st
         if o.ejercicio_clave == ejercicio and o.lado == lado:
             return o.meta
     return None
+
+
+# --- mediciones de referencia (CU-14, OE4) -----------------------------------------
+META_ERROR_ABSOLUTO_MEDIO = 10.0  # indicador de la propuesta: MAE ≤ 10° frente a goniometría
+
+
+class NuevaMedicion(BaseModel):
+    articulacion: str = Field(pattern="^(rodilla|cadera|tobillo)$")
+    lado: Lado = Field(pattern="^(izq|der)$")
+    angulo_goniometro: float = Field(ge=-60, le=180)
+    angulo_sistema: float = Field(ge=-60, le=180)
+    dispersion_sistema: float = Field(ge=0, le=3, description="Solo se aceptan lecturas estables (≤ 3°)")
+    evaluador: str = Field(min_length=1, max_length=80)
+
+
+@rutas.post("/sesiones/{sesion_id}/mediciones-referencia", status_code=201)
+def guardar_medicion(sesion_id: int, datos: NuevaMedicion, bd: Session = Depends(sesion_bd)) -> dict:
+    sesion = bd.get(Sesion, sesion_id)
+    if not sesion:
+        raise HTTPException(404, "Sesión no encontrada")
+    medicion = MedicionReferencia(sesion_id=sesion.id, **datos.model_dump())
+    bd.add(medicion)
+    bd.commit()
+    return {"id": medicion.id, "error": round(medicion.angulo_sistema - medicion.angulo_goniometro, 1)}
+
+
+def resumen_errores(pares: list[tuple[float, float]]) -> dict:
+    """pares: (goniómetro, sistema). Error = sistema − goniómetro."""
+    errores = [s - g for g, s in pares]
+    absolutos = [abs(e) for e in errores]
+    mae = sum(absolutos) / len(absolutos)
+    return {
+        "n": len(errores),
+        "error_absoluto_medio": round(mae, 1),
+        "sesgo": round(sum(errores) / len(errores), 1),  # + = el sistema mide de más
+        "desviacion_error": round(statistics.pstdev(errores), 1),
+        "error_maximo": round(max(absolutos), 1),
+        "cumple_meta": mae <= META_ERROR_ABSOLUTO_MEDIO,
+    }
+
+
+@rutas.get("/pacientes/{codigo}/precision")
+def precision(codigo: str, bd: Session = Depends(sesion_bd)) -> dict:
+    """Error del sistema frente al goniómetro, por articulación y en total (indicador del OE4)."""
+    paciente = _paciente(bd, codigo)
+    mediciones = list(bd.scalars(select(MedicionReferencia).join(Sesion).where(
+        Sesion.paciente_id == paciente.id).order_by(MedicionReferencia.fecha)))
+    por_articulacion: dict[str, list[tuple[float, float]]] = {}
+    for m in mediciones:
+        por_articulacion.setdefault(m.articulacion, []).append((m.angulo_goniometro, m.angulo_sistema))
+    return {
+        "meta": META_ERROR_ABSOLUTO_MEDIO,
+        "total": resumen_errores([(m.angulo_goniometro, m.angulo_sistema) for m in mediciones]) if mediciones else None,
+        "por_articulacion": {a: resumen_errores(p) for a, p in por_articulacion.items()},
+        "mediciones": [{"fecha": _iso(m.fecha), "articulacion": m.articulacion, "lado": m.lado,
+                        "goniometro": m.angulo_goniometro, "sistema": m.angulo_sistema,
+                        "error": round(m.angulo_sistema - m.angulo_goniometro, 1), "evaluador": m.evaluador}
+                       for m in mediciones],
+    }
 
 
 # --- plan adaptado --------------------------------------------------------------

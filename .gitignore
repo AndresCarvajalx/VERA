@@ -2,6 +2,8 @@
 __pycache__/
 .pytest_cache/
 *.pyc
+# Copias de respaldo que Blender crea al guardar
+*.blend1
 # Base de datos local con resultados de jugadores: nunca al repositorio
 data/
 # El modelo se descarga con el script de instalación (ver README)

@@ -239,6 +239,38 @@ def test_evaluaciones_antiguas_no_entran_al_progreso(cliente):
     assert [p["mejor"] for p in serie["puntos"]] == [113.7] and serie["mejora"] == 0
 
 
+def medir(cliente, sesion, gonio, sistema, articulacion="rodilla", dispersion=1.0):
+    return cliente.post(f"/api/sesiones/{sesion}/mediciones-referencia", json={
+        "articulacion": articulacion, "lado": "der", "angulo_goniometro": gonio, "angulo_sistema": sistema,
+        "dispersion_sistema": dispersion, "evaluador": "Ft. Pérez"})
+
+
+def test_precision_frente_al_goniometro(cliente):
+    crear_jugador(cliente)
+    sesion = nueva_sesion(cliente)
+    for gonio, sistema in ((30, 34), (60, 57), (90, 96)):
+        assert medir(cliente, sesion, gonio, sistema).status_code == 201
+    assert medir(cliente, sesion, 10, 12, articulacion="tobillo").status_code == 201
+    p = cliente.get("/api/pacientes/AMC-001/precision").json()
+    rodilla = p["por_articulacion"]["rodilla"]
+    assert rodilla["n"] == 3
+    assert rodilla["error_absoluto_medio"] == pytest.approx(4.3, abs=0.05)  # (4 + 3 + 6) / 3
+    assert rodilla["sesgo"] == pytest.approx(2.3, abs=0.05) and rodilla["error_maximo"] == 6
+    assert rodilla["cumple_meta"] and p["meta"] == 10
+    assert p["total"]["n"] == 4 and len(p["mediciones"]) == 4
+
+
+def test_medicion_inestable_se_rechaza(cliente):
+    crear_jugador(cliente)
+    sesion = nueva_sesion(cliente)
+    assert medir(cliente, sesion, 30, 34, dispersion=6.0).status_code == 422  # el jugador se movía
+
+
+def test_precision_sin_mediciones(cliente):
+    crear_jugador(cliente)
+    assert cliente.get("/api/pacientes/AMC-001/precision").json()["total"] is None
+
+
 def test_jugador_inexistente(cliente):
     assert cliente.post("/api/sesiones", json={"paciente": "NADIE"}).status_code == 404
     assert cliente.get("/api/pacientes/NADIE/progreso").status_code == 404

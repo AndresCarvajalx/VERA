@@ -17,11 +17,22 @@
     <section class="escena">
       <div id="escena3d" class="escena3d"></div>
       <div class="rotulo rotulo-guia"><span id="titulo_guia">Guía</span> · <span id="fase_guia">–</span></div>
-      <div class="rotulo rotulo-jugador">Tú</div>
+      <div class="rotulo rotulo-jugador" id="rotulo_jugador">Tú</div>
       <canvas id="lienzo" class="miniatura" width="640" height="480" title="Esqueleto 2D detectado"></canvas>
       <div id="aviso" class="aviso">Ubícate de cuerpo completo frente a la cámara</div>
       <div id="aviso_vista" class="aviso aviso-vista oculto"></div>
       <div id="aviso_compensacion" class="aviso aviso-compensacion oculto"></div>
+      <div id="hud" class="hud oculto">
+        <span class="hud-etiqueta">Repeticiones</span>
+        <div class="hud-reps" id="hud_reps">0<small>/0</small></div>
+        <div class="hud-medidor" title="Tu ángulo frente a la meta">
+          <div id="hud_relleno" class="hud-medidor-relleno"></div>
+          <div id="hud_meta" class="hud-medidor-meta"></div>
+        </div>
+        <div class="hud-angulo" id="hud_angulo">–</div>
+      </div>
+      <div id="destello" class="destello"></div>
+      <div id="celebracion" class="celebracion" aria-live="polite"></div>
       <button type="button" class="detener-flotante" data-comando="detener">Detener</button>
     </section>
     <aside>
@@ -90,6 +101,23 @@
         <p class="nota" id="reto_maximo">Mejor de la serie: –</p>
       </div>
 
+      <details class="panel-referencia">
+        <summary>Medición de referencia (fisioterapeuta)</summary>
+        <p class="nota">El jugador sostiene una posición; mide el ángulo con el goniómetro y regístralo.
+          El sistema guarda a la vez la mediana de su último segundo de medición.</p>
+        <div class="formulario">
+          <label>Articulación
+            <select id="ref_articulacion"><option value="rodilla">Rodilla</option><option value="cadera">Cadera</option><option value="tobillo">Tobillo</option></select>
+          </label>
+          <label>Lado<select id="ref_lado"><option value="der">Derecho</option><option value="izq">Izquierdo</option></select></label>
+          <p class="nota ancho">Sistema ahora: <strong id="ref_sistema">–</strong></p>
+          <label>Goniómetro (°)<input id="ref_goniometro" type="number" step="1" min="-60" max="180"></label>
+          <label>Evaluador<input id="ref_evaluador" placeholder="Ft. nombre" maxlength="80"></label>
+          <div class="botones"><button type="button" id="btn_registrar_referencia">Registrar medición</button></div>
+          <p class="nota ancho" id="ref_resumen"></p>
+        </div>
+      </details>
+
       <h2>Eventos</h2>
       <ol id="eventos"></ol>
     </aside>
@@ -101,6 +129,8 @@
     <div id="tarjetas_progreso" class="tarjetas"></div>
   </section>
   <div id="tooltip" class="tooltip oculto" role="status"></div>
+  <!-- Los complementos de Three.js (cargador glTF) importan "three" por nombre. -->
+  <script type="importmap">{ "imports": { "three": "./vendor/three.module.min.js" } }</script>
   <script type="module" src="prueba.js"></script>
 </body>
 </html>

@@ -1,8 +1,8 @@
 """Modelo de datos (SQLAlchemy). Ningún dato identifica a la persona: solo un código anónimo.
 
 Entidades del documento de arquitectura implementadas por ahora: Paciente, Consentimiento,
-Ejercicio, ObjetivoAngular, Sesion, ResultadoEjercicio y Repeticion. Usuario (roles),
-Nivel, MedicionReferencia y SerieLandmarks llegan con el panel del fisioterapeuta y el OE4.
+Ejercicio, ObjetivoAngular, Sesion, ResultadoEjercicio, Repeticion y MedicionReferencia.
+Usuario (roles), Nivel y SerieLandmarks llegan con el panel del fisioterapeuta y el OE4.
 """
 from datetime import datetime, timezone
 
@@ -107,6 +107,21 @@ class ResultadoEjercicio(Base):
     fecha: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=ahora)
     sesion: Mapped[Sesion] = relationship(back_populates="resultados")
     repeticiones: Mapped[list["Repeticion"]] = relationship(back_populates="resultado")
+
+
+class MedicionReferencia(Base):
+    """CU-14 / OE4: el ángulo del goniómetro del fisioterapeuta junto al que midió el sistema
+    en el mismo momento, para calcular el error absoluto medio."""
+    __tablename__ = "medicion_referencia"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    sesion_id: Mapped[int] = mapped_column(ForeignKey("sesion.id"))
+    articulacion: Mapped[str] = mapped_column(String(20))  # rodilla, cadera o tobillo
+    lado: Mapped[str] = mapped_column(String(3))
+    angulo_goniometro: Mapped[float] = mapped_column(Float)
+    angulo_sistema: Mapped[float] = mapped_column(Float)  # mediana del último segundo, quieto
+    dispersion_sistema: Mapped[float] = mapped_column(Float)  # desviación en ese segundo
+    evaluador: Mapped[str] = mapped_column(String(80))
+    fecha: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=ahora)
 
 
 class Repeticion(Base):

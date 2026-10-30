@@ -3,6 +3,7 @@
 // todo se dibuja con los puntos que envía el servicio de visión.
 import { Escena3D } from "./escena3d.js";
 import { dibujarProgreso } from "./progreso.js";
+import { etapaPorAvance } from "./toribara.js";
 
 const CONEXIONES = [
   [11, 12], [11, 23], [12, 24], [23, 24],          // tronco
@@ -92,6 +93,9 @@ function actualizarPanel(msg) {
   latencias.push(latencia);
   if (latencias.length > 30) latencias.shift();
   estado.latenciaSuma += latencia; estado.latenciaN += 1;
+  const lectura = lecturaEstable(`${$("ref_articulacion").value}_${$("ref_lado").value}`);
+  $("ref_sistema").textContent = !lectura ? "– (no se ve la articulación)"
+    : `${lectura.mediana.toFixed(1)}° ${lectura.desviacion <= 3 ? "· estable" : `· se mueve (±${lectura.desviacion.toFixed(1)}°)`}`;
   $("fps").textContent = msg.fps.toFixed(1);
   const lento = msg.fps > 0 && msg.fps < 15; // meta del OE4
   $("fps").style.color = lento ? color("--mal") : "";
@@ -159,15 +163,24 @@ const FASES = { pausado: "En pausa", no_visible: "No veo esa pierna", verificand
 
 function actualizarReto(rep) {
   $("reto").classList.toggle("oculto", !rep);
+  $("hud").classList.toggle("oculto", !rep);
   if (!rep) return;
   // La barra avanza hacia la meta: en "abajo" (estirar) avanza cuando el ángulo baja.
   const arriba = rep.direccion === "arriba";
   const escala = arriba ? rep.max_fisiologico : 100;
   const avance = (v) => (arriba ? v : escala - v);
   const pct = (v) => `${Math.max(0, Math.min(100, (avance(v) / escala) * 100))}%`;
+  const enMeta = rep.estado === "en_objetivo" || rep.estado === "bajando";
   $("barra_amplitud").style.width = rep.angulo == null ? "0" : pct(rep.angulo);
-  $("barra_amplitud").classList.toggle("en_objetivo", rep.estado === "en_objetivo" || rep.estado === "bajando");
+  $("barra_amplitud").classList.toggle("en_objetivo", enMeta);
   $("marca_objetivo").style.left = pct(rep.umbral_meta);
+  // Medidor vertical del escenario: la meta queda siempre al 75 % de la altura.
+  const alto = (v) => `${Math.max(0, Math.min(100, (75 * avance(v)) / Math.max(1, avance(rep.umbral_meta))))}%`;
+  $("hud_relleno").style.height = rep.angulo == null ? "0" : alto(rep.angulo);
+  $("hud_relleno").classList.toggle("en_objetivo", enMeta);
+  $("hud_meta").style.bottom = "75%";
+  $("hud_reps").replaceChildren(String(rep.validas), Object.assign(document.createElement("small"), { textContent: `/${rep.repeticiones_meta}` }));
+  $("hud_angulo").textContent = rep.angulo == null ? "–" : `${Math.round(rep.angulo)}°`;
   let texto = rep.fase === "midiendo" ? ESTADOS[rep.estado] ?? rep.estado : FASES[rep.fase] ?? rep.fase;
   if (rep.fase === "midiendo" && rep.estado === "en_objetivo" && rep.tiempo_sostenido_ms > 0) {
     texto += ` ${(rep.sostenido_ms / 1000).toFixed(1)} / ${(rep.tiempo_sostenido_ms / 1000).toFixed(1)} s`;
@@ -179,10 +192,79 @@ function actualizarReto(rep) {
     : `Mejor de la serie: ${rep.mejor.toFixed(0)}° (meta ${rep.meta}°, cuenta desde ${rep.umbral_meta}°)`;
 }
 
+// --- medición de referencia (CU-14) -------------------------------------------
+// Último segundo y medio de ángulos, guardado al llegar cada mensaje (no al dibujar), para
+// comparar con el goniómetro la mediana de lo que midió el sistema mientras el jugador estaba quieto.
+const historial = [];
+
+function registrarAngulos(msg) {
+  historial.push({ t: msg.t_captura, angulos: msg.angulos });
+  while (historial.length && msg.t_captura - historial[0].t > 1500) historial.shift();
+}
+
+function lecturaEstable(clave) {
+  const fin = historial.at(-1)?.t;
+  const valores = historial.filter((h) => fin - h.t <= 1000).map((h) => h.angulos[clave]).filter((v) => v != null);
+  if (valores.length < 8) return null;
+  const orden = [...valores].sort((a, b) => a - b);
+  const mitad = orden.length >> 1;
+  const mediana = orden.length % 2 ? orden[mitad] : (orden[mitad - 1] + orden[mitad]) / 2;
+  const media = valores.reduce((a, b) => a + b, 0) / valores.length;
+  const desviacion = Math.sqrt(valores.reduce((a, v) => a + (v - media) ** 2, 0) / valores.length);
+  return { mediana, desviacion };
+}
+
+async function registrarReferencia() {
+  if (!requiereJugador()) return;
+  const articulacion = $("ref_articulacion").value, lado = $("ref_lado").value;
+  const goniometro = Number($("ref_goniometro").value);
+  const evaluador = $("ref_evaluador").value.trim();
+  if ($("ref_goniometro").value === "" || !evaluador) {
+    mostrarMensaje("Escribe el ángulo del goniómetro y quién mide.", "mal");
+    return;
+  }
+  const lectura = lecturaEstable(`${articulacion}_${lado}`);
+  if (!lectura) { mostrarMensaje("El sistema no ve esa articulación: revisa el encuadre.", "mal"); return; }
+  if (lectura.desviacion > 3) { mostrarMensaje("El jugador se está moviendo: que sostenga la posición y vuelve a registrar.", "mal"); return; }
+  try {
+    await asegurarSesion();
+    const r = await api("POST", `/sesiones/${estado.sesionId}/mediciones-referencia`, {
+      articulacion, lado, angulo_goniometro: goniometro, angulo_sistema: Math.round(lectura.mediana * 10) / 10,
+      dispersion_sistema: Math.round(lectura.desviacion * 10) / 10, evaluador,
+    });
+    mostrarMensaje(`Medición guardada: goniómetro ${goniometro}°, sistema ${lectura.mediana.toFixed(1)}° (error ${r.error > 0 ? "+" : ""}${r.error}°).`, "ok");
+    $("ref_goniometro").value = "";
+    await cargarPrecision();
+  } catch (e) {
+    mostrarMensaje(`No se pudo guardar la medición: ${e.message}`, "mal");
+  }
+}
+
+async function cargarPrecision() {
+  if (!estado.jugador) { $("ref_resumen").textContent = ""; return; }
+  const p = await api("GET", `/pacientes/${encodeURIComponent(estado.jugador)}/precision`);
+  if (!p.total) { $("ref_resumen").textContent = "Aún no hay mediciones de referencia para este jugador."; return; }
+  const partes = Object.entries(p.por_articulacion).map(([a, r]) =>
+    `${a}: error medio ${r.error_absoluto_medio}° (sesgo ${r.sesgo > 0 ? "+" : ""}${r.sesgo}°, n=${r.n})`);
+  $("ref_resumen").textContent = `${partes.join(" · ")}. Total: ${p.total.error_absoluto_medio}° ` +
+    `(${p.total.cumple_meta ? "cumple" : "no cumple"} la meta de ≤ ${p.meta}°).`;
+}
+
 function mostrarMensaje(texto, tipo = "") {
   const m = $("mensaje");
   m.textContent = texto;
   m.className = `mensaje ${tipo}`;
+}
+
+/** Texto grande y animado en el escenario ("¡PERFECTO!", "¡CASI!"...), con un destello de color. */
+function celebrar(texto, clase) {
+  for (const [id, base] of [["celebracion", "celebracion"], ["destello", "destello"]]) {
+    const el = $(id);
+    el.className = base;
+    void el.offsetWidth; // reinicia la animación aunque la clase sea la misma
+    el.className = `${base} ${clase} ver`;
+  }
+  $("celebracion").textContent = texto;
 }
 
 // --- jugador, ejercicio y plan adaptado ---------------------------------------
@@ -204,6 +286,7 @@ function actualizarEjercicio() {
     `Posición: ${POSICION[regla.posicion]}. Ponte de lado, con tu pierna ${LADOS[lado]} hacia la cámara.`;
   estado.plan = null;
   mostrarGuia("normal");
+  mostrarEtapasPierna();
   cargarPlan();
 }
 
@@ -273,6 +356,7 @@ async function elegirJugador(codigo) {
   estado.progreso = codigo ? await api("GET", `/pacientes/${encodeURIComponent(codigo)}/progreso`) : [];
   pintarProgreso();
   actualizarEjercicio();
+  cargarPrecision().catch(() => {});
 }
 
 async function cargarProgreso() {
@@ -287,6 +371,31 @@ function pintarProgreso() {
   $("progreso_vacio").textContent = vacio;
   $("progreso_vacio").classList.toggle("oculto", !vacio);
   dibujarProgreso($("tarjetas_progreso"), estado.progreso, $("tooltip"));
+  mostrarEtapasPierna();
+}
+
+const NOMBRE_ETAPA = {
+  vendada: "vendada", venda_parcial: "quitándose la venda", fortaleciendose: "fortaleciéndose", en_forma: "en plena forma",
+};
+
+/**
+ * La pierna del toribara refleja el rango calibrado del ejercicio elegido frente al normal de las
+ * reglas (arriba: mejor / normal; abajo, estirar desde 90° sentado: lo estirado / 90). Una pierna
+ * sin calibraciones de ese ejercicio se ve normal.
+ */
+function mostrarEtapasPierna() {
+  const { clave, regla } = seleccion();
+  const etapas = {}, textos = [];
+  for (const lado of ["izq", "der"]) {
+    const serie = estado.progreso.find((s) => s.ejercicio === clave && s.lado === lado);
+    if (!serie || !regla) { etapas[lado] = null; continue; }
+    const mejor = serie.ultimo.mejor;
+    const fraccion = regla.direccion === "arriba" ? mejor / serie.referencia : (90 - mejor) / 90;
+    etapas[lado] = etapaPorAvance(Math.max(0, Math.min(1, fraccion)));
+    textos.push(`pierna ${LADOS[lado]} ${NOMBRE_ETAPA[etapas[lado]]} (${Math.round(100 * Math.min(1, fraccion))} % del rango normal)`);
+  }
+  escena.mostrarEtapas(etapas);
+  $("rotulo_jugador").textContent = textos.length ? `Tú · ${textos.join(" · ")}` : "Tú";
 }
 
 async function guardarResumen(resumen) {
@@ -295,9 +404,7 @@ async function guardarResumen(resumen) {
     return;
   }
   try {
-    if (!estado.sesionId) {
-      estado.sesionId = (await api("POST", "/sesiones", { paciente: estado.jugador })).id;
-    }
+    await asegurarSesion();
     await api("POST", `/sesiones/${estado.sesionId}/resultados`, resumen);
     await cargarProgreso();
     await cargarPlan();
@@ -306,6 +413,10 @@ async function guardarResumen(resumen) {
     mostrarMensaje(`No se pudo guardar: ${e.message}`, "mal");
     return false;
   }
+}
+
+async function asegurarSesion() {
+  if (!estado.sesionId) estado.sesionId = (await api("POST", "/sesiones", { paciente: estado.jugador })).id;
 }
 
 function cerrarSesion() {
@@ -398,6 +509,7 @@ async function jugar() {
 
 $("btn_calibrar").addEventListener("click", () => { estado.jugarTrasCalibrar = false; calibrar(); });
 $("btn_jugar").addEventListener("click", jugar);
+$("btn_registrar_referencia").addEventListener("click", registrarReferencia);
 
 for (const boton of document.querySelectorAll("[data-comando]")) {
   boton.addEventListener("click", () => enviar(boton.dataset.comando));
@@ -421,10 +533,16 @@ async function manejarEvento(msg) {
     case "fuera_de_rango":
       mostrarMensaje(msg.mensaje, "mal");
       break;
-    case "rep_valida":
+    case "rep_valida": {
+      // Superar la meta (no solo entrar en la tolerancia) se celebra como "perfecto".
+      const plan = estado.plan;
+      const supero = plan && (plan.direccion === "arriba" ? msg.angulo_pico >= plan.meta : msg.angulo_pico <= plan.meta);
+      celebrar(supero ? "¡PERFECTO!" : "¡BIEN!", supero ? "perfecto" : "bien");
       mostrarMensaje(`¡Repetición ${msg.numero} válida! Llegaste a ${msg.angulo_pico}°`, "ok");
       break;
+    }
     case "rep_incompleta":
+      celebrar("¡CASI!", "casi");
       mostrarMensaje(`Repetición incompleta (${MOTIVOS_REP[msg.motivo] ?? msg.motivo}): llegaste a ${msg.angulo_pico}°. ¡Sigue!`);
       break;
     case "reposo_listo":
@@ -433,6 +551,7 @@ async function manejarEvento(msg) {
         : `Posición inicial registrada (${msg.reposo}°). Ahora haz el movimiento lo más que puedas.`, "ok");
       break;
     case "intento_calibracion":
+      celebrar(`${Math.round(msg.angulo_pico)}°`, "bien");
       mostrarMensaje(`Intento ${msg.numero}: ${msg.angulo_pico}°. Vuelve a la posición inicial y repite.`, "ok");
       break;
     case "calibracion_fallida": {
@@ -457,6 +576,7 @@ async function manejarEvento(msg) {
         estado.jugarTrasCalibrar = false;
         break;
       }
+      celebrar("¡CALIBRADO!", "serie");
       mostrarMensaje(`Calibración guardada: tu rango es de ${r.reposo}° a ${r.mejor}°.` +
         (r.consistente ? "" : " Tus intentos variaron mucho; puedes repetir la calibración."), "ok");
       if (estado.jugarTrasCalibrar) {
@@ -471,6 +591,7 @@ async function manejarEvento(msg) {
       // Una calibración interrumpida no es una medida de rango: no se guarda.
       const guardar = r.tipo === "juego" && r.mejor != null;
       const texto = msg.nombre === "serie_completa" ? "¡Serie completa!" : "Detenido.";
+      if (msg.nombre === "serie_completa") celebrar("¡SERIE COMPLETA!", "serie");
       if (!guardar) {
         estado.jugarTrasCalibrar = false;
         estado.pasoGuia = null;
@@ -508,6 +629,7 @@ function conectar() {
   ws.onmessage = (e) => {
     const msg = JSON.parse(e.data);
     if (msg.tipo === "fotograma") {
+      registrarAngulos(msg);
       // Se dibuja solo el último mensaje en cada repintado; los intermedios se descartan.
       const pendiente = ultimo !== null;
       ultimo = msg;
