@@ -4,6 +4,17 @@
   "tolerancia_meta": 5,
   "visibilidad_minima": 0.6,
   "salto_maximo": 30,
+  "_rangos_referencia": "Tabla de la sección 2 de docs/reglas_rango_movimiento_miembro_inferior.md: rangos de una persona adulta sin patología (Kapandji, Fisiología articular, tomo 2, 6.ª ed., 2012) y valores clínicos de contraste. Son límites de referencia, no metas.",
+  "fuente_rangos": "Kapandji, A. I. (2012). Fisiología articular, Tomo 2: Miembro inferior (6.ª ed.). Editorial Médica Panamericana.",
+  "rangos_referencia": [
+    {"articulacion": "Rodilla", "movimiento": "Flexión", "condicion": "Cadera flexionada", "activo": "~140°", "pasivo": "~160° (el talón toca el glúteo)", "clinico": "0–135°"},
+    {"articulacion": "Rodilla", "movimiento": "Flexión", "condicion": "Cadera extendida (de pie)", "activo": "~120° (los isquiotibiales pierden eficacia)", "pasivo": "—", "clinico": "—"},
+    {"articulacion": "Rodilla", "movimiento": "Extensión", "condicion": "Desde cualquier flexión hasta la posición de referencia", "activo": "0° (rara vez la supera)", "pasivo": "Hiperextensión 5–10°", "clinico": "0°"},
+    {"articulacion": "Cadera", "movimiento": "Flexión", "condicion": "Rodilla flexionada", "activo": "~120°", "pasivo": ">140° (muslo casi contra el tórax)", "clinico": "0–120°"},
+    {"articulacion": "Cadera", "movimiento": "Flexión", "condicion": "Rodilla extendida", "activo": "~90°", "pasivo": ">120°", "clinico": "—"},
+    {"articulacion": "Tobillo", "movimiento": "Flexión dorsal (dorsiflexión)", "condicion": "Planta perpendicular a la pierna = 0°", "activo": "20–30° (variación ±10°)", "pasivo": "—", "clinico": "0–20°"},
+    {"articulacion": "Tobillo", "movimiento": "Flexión plantar", "condicion": "—", "activo": "30–50° (variación >20°)", "pasivo": "—", "clinico": "0–50°"}
+  ],
   "_calibracion": "Decisiones de diseño (no de la literatura). Mide el rango real del jugador por intentos: reposo quieto, varios intentos máximos y la mediana de los mejores picos sostenidos.",
   "calibracion": {
     "reposo_ms": 1000,

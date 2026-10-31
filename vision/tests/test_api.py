@@ -271,6 +271,33 @@ def test_precision_sin_mediciones(cliente):
     assert cliente.get("/api/pacientes/AMC-001/precision").json()["total"] is None
 
 
+def test_rangos_de_referencia_de_kapandji(cliente):
+    datos = cliente.get("/api/rangos").json()
+    assert "Kapandji" in datos["fuente"]
+    rodilla_de_pie = [r for r in datos["rangos"] if r["condicion"].startswith("Cadera extendida")][0]
+    assert rodilla_de_pie["activo"].startswith("~120°")
+    assert {r["articulacion"] for r in datos["rangos"]} == {"Rodilla", "Cadera", "Tobillo"}
+
+
+def test_personajes_elegibles(cliente):
+    claves = [p["clave"] for p in cliente.get("/api/personajes").json()]
+    assert claves == ["persona", "toribara", "conejibara"]
+    crear_jugador(cliente)
+    assert cliente.get("/api/pacientes/AMC-001").json()["personaje"] == "persona"  # por defecto
+    assert cliente.patch("/api/pacientes/AMC-001", json={"personaje": "conejibara"}).status_code == 200
+    assert cliente.get("/api/pacientes/AMC-001").json()["personaje"] == "conejibara"
+    assert cliente.patch("/api/pacientes/AMC-001", json={"personaje": "dragon"}).status_code == 422
+
+
+def test_cada_personaje_tiene_modelo_y_retrato():
+    from pathlib import Path
+    from api.rutas import PERSONAJES
+    web = Path(__file__).resolve().parents[2] / "web"
+    for clave in PERSONAJES:
+        assert (web / "modelos" / f"{clave}.glb").stat().st_size > 100_000
+        assert (web / "modelos" / f"{clave}.png").exists()
+
+
 def test_jugador_inexistente(cliente):
     assert cliente.post("/api/sesiones", json={"paciente": "NADIE"}).status_code == 404
     assert cliente.get("/api/pacientes/NADIE/progreso").status_code == 404

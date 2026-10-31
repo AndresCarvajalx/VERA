@@ -16,6 +16,14 @@ from .modelos import (Consentimiento, Ejercicio, MedicionReferencia, ObjetivoAng
                       ResultadoEjercicio, Sesion, ahora)
 
 rutas = APIRouter()
+
+# Personajes elegibles; sus modelos los genera modelado/generar_personajes.py en web/modelos/.
+PERSONAJES = {
+    "persona": {"nombre": "Persona", "descripcion": "Deportista en ropa de entrenamiento."},
+    "toribara": {"nombre": "Toribara", "descripcion": "Mitad toro, mitad capibara: cuernos, mechón y pezuñas."},
+    "conejibara": {"nombre": "Conejibara", "descripcion": "Mitad conejo, mitad capibara: orejas largas y cola de pompón."},
+}
+PERSONAJE_POR_DEFECTO = "persona"
 CODIGO = re.compile(r"^[A-Za-z0-9-]{3,20}$")
 Lado = str  # "izq" o "der", validado con pattern en los esquemas
 
@@ -34,6 +42,10 @@ class NuevoObjetivo(BaseModel):
     repeticiones: int = Field(ge=1, le=50)
     tiempo_sostenido_ms: int = Field(ge=0, le=30000)
     aprobado_por: str = Field(min_length=1, max_length=80)
+
+
+class CambioPaciente(BaseModel):
+    personaje: str
 
 
 class NuevaSesion(BaseModel):
@@ -141,11 +153,35 @@ def crear_paciente(datos: NuevoPaciente, bd: Session = Depends(sesion_bd)) -> di
     return {"codigo": paciente.codigo}
 
 
+@rutas.get("/rangos")
+def rangos() -> dict:
+    """Rangos de movimiento de una persona adulta sin patología (Kapandji), para el manual."""
+    reglas = cargar()
+    return {"fuente": reglas.fuente_rangos, "rangos": list(reglas.rangos_referencia)}
+
+
+@rutas.get("/personajes")
+def personajes() -> list[dict]:
+    return [{"clave": clave, **datos, "modelo": f"modelos/{clave}.glb", "imagen": f"modelos/{clave}.png"}
+            for clave, datos in PERSONAJES.items()]
+
+
 @rutas.get("/pacientes/{codigo}")
 def ver_paciente(codigo: str, bd: Session = Depends(sesion_bd)) -> dict:
     paciente = _paciente(bd, codigo)
     return {"codigo": paciente.codigo, "consentimiento_vigente": paciente.consentimiento_vigente,
+            "personaje": paciente.personaje or PERSONAJE_POR_DEFECTO,
             "objetivos": [_objetivo_json(o) for o in _objetivos_vigentes(bd, paciente.id)]}
+
+
+@rutas.patch("/pacientes/{codigo}")
+def cambiar_paciente(codigo: str, datos: CambioPaciente, bd: Session = Depends(sesion_bd)) -> dict:
+    if datos.personaje not in PERSONAJES:
+        raise HTTPException(422, f"Personaje desconocido: {datos.personaje}. Opciones: {sorted(PERSONAJES)}")
+    paciente = _paciente(bd, codigo)
+    paciente.personaje = datos.personaje
+    bd.commit()
+    return {"codigo": paciente.codigo, "personaje": paciente.personaje}
 
 
 @rutas.put("/pacientes/{codigo}/objetivos")

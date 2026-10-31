@@ -22,6 +22,7 @@ class Paciente(Base):
     __tablename__ = "paciente"
     id: Mapped[int] = mapped_column(primary_key=True)
     codigo: Mapped[str] = mapped_column(String(20), unique=True)
+    personaje: Mapped[str | None] = mapped_column(String(20))  # el que eligió para jugar (rutas.PERSONAJES)
     creado: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=ahora)
     consentimientos: Mapped[list["Consentimiento"]] = relationship(back_populates="paciente")
     sesiones: Mapped[list["Sesion"]] = relationship(back_populates="paciente")

@@ -6,6 +6,12 @@
       "runtimeExecutable": "D:\\proyectodegrado\\.venv\\Scripts\\python.exe",
       "runtimeArgs": ["-m", "uvicorn", "app.servicio:app", "--app-dir", "D:\\proyectodegrado\\vision", "--port", "8765"],
       "port": 8765
+    },
+    {
+      "name": "simulado",
+      "runtimeExecutable": "D:\\proyectodegrado\\.venv\\Scripts\\python.exe",
+      "runtimeArgs": ["D:\\proyectodegrado\\vision\\herramientas\\jugador_simulado.py"],
+      "port": 8766
     }
   ]
 }

@@ -88,3 +88,26 @@ export function cicloGuia(t, objetivo, sostenerMs) {
   if (u < SUBIR + sostenerMs + BAJAR) return { grados: objetivo * (1 - suave((u - SUBIR - sostenerMs) / BAJAR)), fase: "baja" };
   return { grados: 0, fase: "descansa" };
 }
+
+/** De pie y quieto, respirando apenas (los hombros suben y bajan un centímetro). */
+export function poseQuieta(t = 0) {
+  const pts = poseDePie();
+  const respira = Math.sin(t / 900) * 0.01;
+  for (const parte of ["oreja", "hombro", "codo", "muneca"]) {
+    for (const L of ["Izq", "Der"]) pts[P[`${parte}${L}`]].y += respira;
+  }
+  return pts;
+}
+
+/**
+ * De pie saludando con la mano. brazo: 1 = el que queda a la derecha de la pantalla (lado "Der"
+ * de los puntos, que el personaje muestra en espejo), -1 = el de la izquierda.
+ */
+export function poseSaludo(t, brazo) {
+  const pts = poseQuieta(t);
+  const L = brazo === 1 ? "Der" : "Izq";
+  const codo = pts[P[`codo${L}`]].copy(pts[P[`hombro${L}`]]).add(new THREE.Vector3(0.14 * brazo, 0.14, 0.06));
+  const vaiven = Math.sin(t / 110) * 0.09; // la mano va y viene, como al decir hola
+  pts[P[`muneca${L}`]].copy(codo).add(new THREE.Vector3((0.05 + vaiven) * brazo, 0.24, 0.02));
+  return pts;
+}

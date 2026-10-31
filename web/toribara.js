@@ -1,4 +1,6 @@
-// El "toribara" (modelado/generar_toribara.py) movido con los puntos del jugador o de la guía.
+// Los personajes elegibles (toribara, conejibara: modelado/generar_personajes.py) movidos con
+// los puntos del jugador o de la guía. Todos comparten esqueleto, así que esta clase sirve para
+// cualquiera (se llama Toribara porque fue el primero).
 //
 // Retargeting: cada hueso se gira para que su eje (el +Y local, que va de su articulación a la
 // siguiente) apunte en la dirección del segmento correspondiente del esqueleto calculado por
@@ -10,7 +12,9 @@ import * as THREE from "./vendor/three.module.min.js";
 import { GLTFLoader } from "./vendor/addons/loaders/GLTFLoader.js";
 import { P } from "./avatar.js";
 
-const ESCALA = 1.3; // el modelo mide ~1.3 m; se agranda para ocupar lo mismo que el avatar anterior
+// Todos los personajes se muestran con la misma altura en la escena (la persona mide 1.70 m y los
+// capibaras ~1.35 m con la cabeza), igual que el avatar de cilindros.
+const ALTURA_EN_ESCENA = 1.72;
 const ESPEJO = { izq: "der", der: "izq" }; // lado del jugador → lado del modelo
 const ARRIBA = new THREE.Vector3(0, 1, 0);
 
@@ -41,8 +45,8 @@ export function etapaPorAvance(fraccion) {
   return "en_forma";
 }
 
-/** Cada personaje necesita su propia copia (tiene su propio esqueleto): se carga una vez por personaje. */
-export function cargarModelo(url = "modelos/toribara.glb") {
+/** Cada instancia necesita su propia copia (tiene su propio esqueleto): se carga una vez por instancia. */
+export function cargarModelo(url) {
   return new GLTFLoader().loadAsync(url);
 }
 
@@ -55,7 +59,11 @@ export class Toribara {
   constructor(escena, gltf, { guia = false, color } = {}) {
     this.grupo = new THREE.Group();
     this.modelo = gltf.scene;
-    this.modelo.scale.setScalar(ESCALA);
+    // Las mallas con esqueleto calculan su caja con las matrices de los huesos: hay que
+    // actualizarlas antes, o la altura sale mal (0.47 m en lugar de 1.77 m para la persona).
+    this.modelo.updateMatrixWorld(true);
+    const caja = new THREE.Box3().setFromObject(this.modelo);
+    this.modelo.scale.setScalar(ALTURA_EN_ESCENA / (caja.max.y - caja.min.y));
     this.grupo.add(this.modelo);
     escena.add(this.grupo);
     this.modelo.updateMatrixWorld(true);
@@ -72,6 +80,7 @@ export class Toribara {
     // cada muslo (los huesos cadera_* nacen los dos en el centro de la pelvis).
     this.ejeCaderaReposo = pos("muslo_der").sub(pos("muslo_izq")).normalize();
     this.altoPiso = Math.min(pos("pie_izq").y, pos("pie_der").y) - this.grupo.position.y;
+    this.alturaRodilla = pos("pierna_izq").y; // el hueso pierna nace en la rodilla
 
     this.opcionales = {};
     this.modelo.traverse((o) => {

@@ -73,6 +73,8 @@ class Reglas:
     calibracion: ParametrosCalibracion
     adaptacion: ParametrosAdaptacion
     ejercicios: dict[str, ReglaEjercicio]
+    rangos_referencia: tuple[dict, ...]  # tabla de Kapandji, para el manual
+    fuente_rangos: str
 
 
 @lru_cache
@@ -105,4 +107,6 @@ def cargar(ruta: Path = RUTA) -> Reglas:
         calibracion=ParametrosCalibracion(**datos["calibracion"]),
         adaptacion=ParametrosAdaptacion(**datos["adaptacion"]),
         ejercicios=ejercicios,
+        rangos_referencia=tuple(datos["rangos_referencia"]),
+        fuente_rangos=datos["fuente_rangos"],
     )

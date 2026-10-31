@@ -65,38 +65,73 @@ export class Escena3D {
     this.silla.position.set(0, 0.23, 0.05);
     this.guia.grupo.add(this.silla); // gira junto con la guía
     this.etapas = {};
-    this._cargarPersonajes();
+    this.personaje = null;
+    this._pedido = 0; // descarta cargas viejas si se elige otro personaje antes de que termine
+    this.cambiarPersonaje("persona"); // personaje por defecto; la página lo cambia según el jugador
 
     this.ejercicioGuia = { articulacion: "rodilla", lado: "der", sentido: 1, objetivo: 20, tiempo_sostenido_ms: 500 };
     this.faseGuia = "";
     this._inicio = performance.now();
-    new ResizeObserver(() => this._ajustarTamano()).observe(contenedor);
+    this._observador = new ResizeObserver(() => this._ajustarTamano());
+    this._observador.observe(contenedor);
     this._ajustarTamano();
-    this.renderer.setAnimationLoop(() => this._cuadro());
   }
 
   /**
-   * Cambia los avatares de cilindros por el toribara (modelado/generar_toribara.py). Si el
-   * modelo no carga, el juego sigue con los avatares simples.
+   * Cámara más lejana para la sesión guiada: el escenario ocupa toda la pantalla y arriba va la
+   * tarjeta de instrucciones, así que los personajes deben quedar más chicos y más abajo.
    */
-  async _cargarPersonajes() {
+  camaraAmplia(si) {
+    if (si) { this.camara.position.set(0, 1.25, 5.6); this.camara.lookAt(0, 1.0, 0); }
+    else { this.camara.position.set(0, 1.15, 4.3); this.camara.lookAt(0, 0.85, 0); }
+  }
+
+  /** Lleva el mismo lienzo a otro contenedor (sesión guiada ↔ panel del fisioterapeuta). */
+  moverA(contenedor) {
+    if (contenedor === this.contenedor) return;
+    this._observador.unobserve(this.contenedor);
+    this.contenedor = contenedor;
+    contenedor.appendChild(this.renderer.domElement);
+    this._observador.observe(contenedor);
+    this._ajustarTamano();
+  }
+
+  /** Dibuja solo mientras la pantalla del juego está a la vista (las demás tienen sus propias escenas). */
+  activar(si) {
+    if (si) this._ajustarTamano();
+    this.renderer.setAnimationLoop(si ? () => this._cuadro() : null);
+  }
+
+  /**
+   * Pone al jugador y a la guía con el personaje elegido (modelado/generar_personajes.py:
+   * "persona", "toribara", "conejibara"). Si el modelo no carga, se conservan los personajes actuales
+   * (al principio, los avatares de cilindros). Devuelve true si el cambio se hizo.
+   */
+  async cambiarPersonaje(clave) {
+    if (clave === this.personaje) return true;
+    const pedido = ++this._pedido;
     try {
-      const [modeloJugador, modeloGuia] = await Promise.all([cargarModelo(), cargarModelo()]);
+      const url = `modelos/${clave}.glb`;
+      const [modeloJugador, modeloGuia] = await Promise.all([cargarModelo(url), cargarModelo(url)]);
+      if (pedido !== this._pedido) return false; // mientras cargaba se eligió otro
       const jugador = new Toribara(this.escena, modeloJugador);
       const guia = new Toribara(this.escena, modeloGuia, { guia: true, color: token("--guia") });
       jugador.grupo.position.x = SEPARACION;
       guia.grupo.position.x = -SEPARACION;
       guia.grupo.rotation.y = this.guia.grupo.rotation.y;
-      // El toribara tiene las piernas más cortas: la silla de la guía se ajusta a su cadera.
-      this.silla.scale.y = 0.3 / 0.46;
-      this.silla.position.set(0, 0.15, -0.02);
+      // La silla de la guía se ajusta a la altura de la rodilla de cada personaje (asiento ≈ rodilla).
+      const asiento = guia.alturaRodilla;
+      this.silla.scale.y = asiento / 0.46;
+      this.silla.position.set(0, asiento / 2, -0.02);
       guia.grupo.add(this.silla);
-      jugador.ocultar();
+      jugador.grupo.visible = this.jugador.grupo.visible;
       jugador.mostrarEtapas(this.etapas);
       this.escena.remove(this.jugador.grupo, this.guia.grupo);
-      [this.jugador, this.guia] = [jugador, guia];
+      [this.jugador, this.guia, this.personaje] = [jugador, guia, clave];
+      return true;
     } catch (error) {
-      console.warn("No se pudo cargar el toribara; se usan los avatares simples.", error);
+      console.warn(`No se pudo cargar el personaje ${clave}; se conserva el actual.`, error);
+      return false;
     }
   }
 

@@ -11,13 +11,15 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
 from api import bd as base_datos
 from api.rutas import rutas as rutas_api
 
-from .captura import BucleCaptura
+from . import ajustes
+from .captura import BucleCaptura, es_url_de_camara, listar_camaras
 from .estimador import EstimadorMediaPipe
 
 RAIZ = Path(__file__).resolve().parents[2]
@@ -65,11 +67,9 @@ async def ciclo_de_vida(app: FastAPI):
     global bucle
     base_datos.iniciar()
     difusor.enlazar(asyncio.get_running_loop())
-    bucle = BucleCaptura(
-        EstimadorMediaPipe(MODELO),
-        difusor.publicar_desde_hilo,
-        indice_camara=int(os.environ.get("CAMARA", "0")),
-    )
+    # La variable de entorno CAMARA manda; si no, la última elegida en Ajustes; si no, la 0.
+    fuente = int(os.environ["CAMARA"]) if "CAMARA" in os.environ else ajustes.leer().get("camara", 0)
+    bucle = BucleCaptura(EstimadorMediaPipe(MODELO), difusor.publicar_desde_hilo, indice_camara=fuente)
     bucle.iniciar()
     yield
     bucle.detener()
@@ -77,6 +77,39 @@ async def ciclo_de_vida(app: FastAPI):
 
 app = FastAPI(title="Servicio de visión AMC", lifespan=ciclo_de_vida)
 app.include_router(rutas_api, prefix="/api")
+
+
+# --- cámara (Ajustes) -------------------------------------------------------------
+class CambioCamara(BaseModel):
+    fuente: int | str  # índice de una cámara del equipo, o URL de la cámara de un celular
+
+
+@app.get("/api/camara")
+def ver_camara() -> dict:
+    """La cámara en uso y las del equipo que responden (abrir cada una tarda ~1 s)."""
+    actual = bucle.fuente
+    return {"actual": actual, "dispositivos": listar_camaras(excluir=actual if isinstance(actual, int) else None)}
+
+
+@app.put("/api/camara")
+def cambiar_camara(datos: CambioCamara) -> dict:
+    fuente = datos.fuente
+    if isinstance(fuente, str):
+        fuente = fuente.strip()
+        if fuente.isdigit():
+            fuente = int(fuente)
+        elif not es_url_de_camara(fuente):
+            raise HTTPException(422, "La cámara debe ser un número (0, 1, ...) o una URL http://, https:// o rtsp://")
+    if isinstance(fuente, int) and not 0 <= fuente <= 9:
+        raise HTTPException(422, "El número de cámara va de 0 a 9")
+    try:
+        abrio = bucle.cambiar_camara(fuente).result(timeout=20)
+    except TimeoutError:
+        raise HTTPException(504, "La cámara tardó demasiado en responder")
+    if not abrio:
+        raise HTTPException(409, f"No se pudo abrir la cámara {fuente}; se sigue usando la anterior")
+    ajustes.guardar({"camara": fuente})
+    return {"actual": fuente}
 
 
 @app.websocket("/ws")

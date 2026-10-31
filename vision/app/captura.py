@@ -8,6 +8,7 @@ import queue
 import threading
 import time
 from collections import deque
+from concurrent.futures import Future
 from typing import Callable
 
 import cv2
@@ -35,6 +36,41 @@ class MedidorFps:
         return (len(self._tiempos) - 1) / (self._tiempos[-1] - self._tiempos[0])
 
 
+Fuente = int | str  # índice de una cámara del equipo, o URL de la cámara de un celular
+
+
+def es_url_de_camara(fuente) -> bool:
+    return isinstance(fuente, str) and fuente.lower().startswith(("http://", "https://", "rtsp://"))
+
+
+def abrir_captura(fuente: Fuente) -> cv2.VideoCapture:
+    if isinstance(fuente, str):
+        # Celular como cámara IP (apps como IP Webcam o DroidCam): OpenCV lee el video por la red.
+        return cv2.VideoCapture(fuente)
+    # Media Foundation y no DirectShow: con poca luz la cámara alarga la exposición y DirectShow
+    # cae a 4.8 FPS, mientras MSMF sostiene ~16 (con buena luz ambos dan 30). Medido en el
+    # equipo de desarrollo con herramientas/medir_rendimiento.py.
+    return cv2.VideoCapture(fuente, cv2.CAP_MSMF)
+
+
+def listar_camaras(excluir: Fuente | None = None, maximo: int = 5) -> list[dict]:
+    """Cámaras del equipo que responden (índice y resolución). La que está en uso no se abre otra vez."""
+    camaras = []
+    for indice in range(maximo):
+        if indice == excluir:
+            camaras.append({"indice": indice, "en_uso": True})
+            continue
+        captura = abrir_captura(indice)
+        try:
+            ok, fotograma = captura.read() if captura.isOpened() else (False, None)
+            if ok:
+                alto, ancho = fotograma.shape[:2]
+                camaras.append({"indice": indice, "en_uso": False, "ancho": ancho, "alto": alto})
+        finally:
+            captura.release()
+    return camaras
+
+
 class LectorCamara:
     """Lee la cámara en su propio hilo y guarda solo el último fotograma.
 
@@ -42,8 +78,8 @@ class LectorCamara:
     limitados por el más lento de los dos, no por la suma (medido: 8.5 → ~16 FPS con poca luz).
     """
 
-    def __init__(self, indice: int, ancho: int, alto: int) -> None:
-        self._indice, self._ancho, self._alto = indice, ancho, alto
+    def __init__(self, fuente: Fuente, ancho: int, alto: int) -> None:
+        self._indice, self._ancho, self._alto = fuente, ancho, alto
         self._camara: cv2.VideoCapture | None = None
         self._condicion = threading.Condition()
         self._ultimo: tuple[int, object, int] | None = None  # (secuencia, fotograma, t_captura)
@@ -51,13 +87,12 @@ class LectorCamara:
         self._hilo: threading.Thread | None = None
 
     def abrir(self) -> bool:
-        # Media Foundation y no DirectShow: con poca luz la cámara alarga la exposición y DirectShow
-        # cae a 4.8 FPS, mientras MSMF sostiene ~16 (con buena luz ambos dan 30). Medido en el
-        # equipo de desarrollo con herramientas/medir_rendimiento.py.
-        self._camara = cv2.VideoCapture(self._indice, cv2.CAP_MSMF)
-        self._camara.set(cv2.CAP_PROP_FRAME_WIDTH, self._ancho)
-        self._camara.set(cv2.CAP_PROP_FRAME_HEIGHT, self._alto)
-        if not self._camara.isOpened():
+        self._camara = abrir_captura(self._indice)
+        if isinstance(self._indice, int):
+            self._camara.set(cv2.CAP_PROP_FRAME_WIDTH, self._ancho)
+            self._camara.set(cv2.CAP_PROP_FRAME_HEIGHT, self._alto)
+        if not self._camara.isOpened() or not self._camara.read()[0]:
+            self._camara.release()
             return False
         self._activo = True
         self._hilo = threading.Thread(target=self._leer, name="lector-camara", daemon=True)
@@ -95,11 +130,12 @@ class LectorCamara:
 
 
 class BucleCaptura:
-    def __init__(self, estimador: EstimadorPose, publicar: Publicar, indice_camara: int = 0,
+    def __init__(self, estimador: EstimadorPose, publicar: Publicar, indice_camara: Fuente = 0,
                  ancho: int = 640, alto: int = 480) -> None:
         self._estimador = estimador
         self._publicar = publicar
         self._indice_camara = indice_camara
+        self._cambios: queue.Queue[tuple[Fuente, Future]] = queue.Queue()  # cambios de cámara pedidos
         self._ancho_pedido, self._alto_pedido = ancho, alto
         self._hilo: threading.Thread | None = None
         self._detener = threading.Event()
@@ -117,6 +153,35 @@ class BucleCaptura:
 
     def enviar_comando(self, datos: dict) -> None:
         self._comandos.put(datos)
+
+    @property
+    def fuente(self) -> Fuente:
+        return self._indice_camara
+
+    def cambiar_camara(self, fuente: Fuente) -> Future:
+        """Pide usar otra cámara. El futuro se resuelve con True si abrió, False si no (sigue la anterior)."""
+        futuro: Future = Future()
+        self._cambios.put((fuente, futuro))
+        return futuro
+
+    def _atender_cambio_de_camara(self, lector: "LectorCamara | None") -> "LectorCamara | None":
+        while not self._cambios.empty():
+            fuente, futuro = self._cambios.get_nowait()
+            if lector:
+                lector.cerrar()  # algunas cámaras no se pueden abrir dos veces a la vez
+            nuevo = LectorCamara(fuente, self._ancho_pedido, self._alto_pedido)
+            if nuevo.abrir():
+                self._indice_camara, lector = fuente, nuevo
+                self._filtros = []
+                log.info("Cámara cambiada a %s", fuente)
+                self._evento("camara_cambiada", fuente=fuente)
+                futuro.set_result(True)
+                continue
+            log.warning("No se pudo abrir la cámara %s; se vuelve a la anterior", fuente)
+            anterior = LectorCamara(self._indice_camara, self._ancho_pedido, self._alto_pedido)
+            lector = anterior if lector and anterior.abrir() else None
+            futuro.set_result(False)
+        return lector
 
     def _atender_comandos(self) -> None:
         while not self._comandos.empty():
@@ -157,18 +222,26 @@ class BucleCaptura:
         self._publicar({"tipo": "evento", "nombre": nombre, "t": int(time.time() * 1000), **datos})
 
     def _correr(self) -> None:
-        lector = LectorCamara(self._indice_camara, self._ancho_pedido, self._alto_pedido)
-        if not lector.abrir():
+        lector: LectorCamara | None = LectorCamara(self._indice_camara, self._ancho_pedido, self._alto_pedido)
+        if lector.abrir():
+            log.info("Cámara %s abierta", self._indice_camara)
+        else:
+            # Sin cámara el servicio sigue vivo: desde Ajustes se puede elegir otra.
             log.error("No se pudo abrir la cámara %s", self._indice_camara)
-            self._evento("camara_no_disponible")
-            self._estimador.cerrar()
-            return
+            self._evento("camara_no_disponible", fuente=self._indice_camara)
+            lector = None
         fps = MedidorFps()
-        log.info("Cámara %s abierta", self._indice_camara)
         secuencia = 0
         try:
             while not self._detener.is_set():
                 self._atender_comandos()
+                antes = lector
+                lector = self._atender_cambio_de_camara(lector)
+                if lector is not antes:
+                    secuencia = 0
+                if lector is None:
+                    time.sleep(0.2)
+                    continue
                 dato = lector.siguiente(secuencia, timeout=0.5)
                 if dato is None:
                     continue
@@ -178,7 +251,8 @@ class BucleCaptura:
                 del fotograma  # el video nunca sale de aquí
                 self._procesar(pose, t_captura, ancho, alto, fps.marcar(time.perf_counter()))
         finally:
-            lector.cerrar()
+            if lector:
+                lector.cerrar()
             self._estimador.cerrar()
 
     def _procesar(self, pose: Pose | None, t_captura: int, ancho: int, alto: int, fps: float) -> None:
