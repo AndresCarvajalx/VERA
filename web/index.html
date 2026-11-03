@@ -17,6 +17,7 @@
       <p class="lema">Rehabilitación en movimiento</p>
       <nav class="menu-botones">
         <button type="button" class="boton-menu primario" data-ir="personaje">Iniciar</button>
+        <button type="button" class="boton-menu" data-ir="progreso">Mi progreso</button>
         <button type="button" class="boton-menu" data-ir="manual">Manual de usuario</button>
         <button type="button" class="boton-menu" data-ir="ajustes">Ajustes</button>
       </nav>
@@ -75,7 +76,7 @@
             <li><strong>Ponte de lado</strong> frente a la cámara, con esa pierna hacia ella, a 2–3 metros.</li>
             <li><strong>Calibra:</strong> quédate quieto en la posición inicial y luego haz el movimiento lo más que puedas, 3 veces, sin dolor. El juego mide tu rango real.</li>
             <li><strong>Juega:</strong> el juego calcula tu meta a partir de tu rango. Cada repetición que llega a la meta suma.</li>
-            <li><strong>Mira tu progreso</strong> al final de la página del juego: un punto por sesión con tu rango calibrado.</li>
+            <li><strong>Mira tu progreso</strong> en «Mi progreso», desde el menú: el tiempo que jugaste cada día y cómo mejora tu rango.</li>
           </ol>
         </article>
         <article id="manual_preparar" class="tarjeta-manual">
@@ -162,6 +163,46 @@
           <div><span class="etiqueta">Vista</span><strong id="vista_ajustes">–</strong></div>
         </div>
       </article>
+    </div>
+  </section>
+
+  <!-- ============ MI PROGRESO ============ -->
+  <section id="pantalla_progreso" class="pantalla" aria-label="Mi progreso">
+    <header class="barra-superior">
+      <button type="button" class="volver" data-ir="menu">← Menú</button>
+      <img src="logo.svg" class="logo-chico" alt="VERA">
+      <h1>Mi progreso</h1>
+    </header>
+    <div class="mi-progreso">
+      <div class="filtros-progreso">
+        <label>Jugador<select id="progreso_jugador"><option value="">— elige —</option></select></label>
+        <div id="periodo_progreso" class="periodo" role="radiogroup" aria-label="Periodo">
+          <button type="button" role="radio" data-dias="7">7 días</button>
+          <button type="button" role="radio" data-dias="30">30 días</button>
+          <button type="button" role="radio" data-dias="todo">Todo</button>
+        </div>
+        <button type="button" id="btn_descargar_progreso" title="Todos los datos del jugador, un renglón por día">Descargar datos (CSV)</button>
+      </div>
+      <p id="progreso_mensaje" class="nota oculto"></p>
+      <div id="contenido_progreso" class="oculto">
+        <div id="cifras_progreso" class="cifras-progreso"></div>
+        <article class="tarjeta">
+          <h3>Tiempo jugado por día</h3>
+          <p class="nota">Solo cuenta el tiempo en movimiento: sin pausas ni la espera mientras te ubicas.</p>
+          <div id="grafica_tiempo" class="grafica-tiempo"></div>
+          <p class="nota" id="nota_tiempo"></p>
+          <details>
+            <summary>Ver datos por día</summary>
+            <table>
+              <thead><tr><th>Día</th><th>Tiempo</th><th>Series</th><th>Válidas</th><th>Calibraciones</th></tr></thead>
+              <tbody id="tabla_dias"></tbody>
+            </table>
+          </details>
+        </article>
+        <h2 class="titulo-mejoria">Tu mejoría</h2>
+        <p class="nota oculto" id="mejoria_vacia">No hay calibraciones en este periodo. Prueba con «Todo».</p>
+        <div id="tarjetas_diarias" class="tarjetas"></div>
+      </div>
     </div>
   </section>
 
@@ -336,7 +377,7 @@
     </main>
 
     <section id="progreso" class="progreso-seccion">
-      <h2>Mi progreso</h2>
+      <h2>Progreso por sesión</h2>
       <p class="nota" id="progreso_vacio">Elige un jugador para ver su progreso.</p>
       <div id="tarjetas_progreso" class="tarjetas"></div>
     </section>

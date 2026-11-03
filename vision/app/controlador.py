@@ -27,6 +27,9 @@ MARGEN_REPOSO = 10  # grados sobre el reposo medido del jugador para considerar 
 REPETICIONES_SEGUIDAS_RESINCRONIZAR = 3  # fotogramas coherentes tras un salto para aceptarlo
 
 
+MAX_HUECO_MS = 1000
+
+
 class ComandoInvalido(Exception):
     pass
 
@@ -78,6 +81,8 @@ class Actividad:
     compensando: bool = False
     fuera_de_rango: bool = False
     fps: list[float] = field(default_factory=list)
+    activo_ms: int = 0  # tiempo realmente en movimiento: sin pausas ni la espera de ponerse de lado
+    t_anterior: int | None = None
 
     @property
     def clave(self) -> str:
@@ -230,9 +235,14 @@ class Controlador:
 
         activo = act.vista_ok and not self.pausado
         if activo:
+            # Un hueco largo (la cámara se trabó) no cuenta como tiempo jugado.
+            if act.t_anterior is not None:
+                act.activo_ms += min(t_ms - act.t_anterior, MAX_HUECO_MS)
             act.fps.append(fps)
             if angulo is not None and not compensando:
                 act.angulos.append(angulo)
+
+        act.t_anterior = t_ms
 
         # 3. Calibración o conteo del juego.
         if act.tipo == "calibracion":
@@ -317,6 +327,7 @@ class Controlador:
             "compensaciones": act.compensaciones,
             "fps_promedio": round(sum(act.fps) / len(act.fps), 1) if act.fps else None,
             "completo": nombre in ("calibracion_lista", "serie_completa"),
+            "duracion_s": round(act.activo_ms / 1000, 1),
         }
         if act.calibracion:
             # El rango calibrado sale de los intentos, no de los extremos sueltos de los fotogramas.
@@ -332,5 +343,7 @@ class Controlador:
 
     def _fallar(self, motivo: str) -> dict:
         act = self.actividad
-        self.actividad = None
-        return {"nombre": "calibracion_fallida", "ejercicio": act.regla.clave, "lado": act.lado, "motivo": motivo}
+        # El resumen va incompleto: no cuenta como rango medido, pero sí como tiempo jugado.
+        resumen = self._terminar("calibracion_fallida")["resumen"]
+        return {"nombre": "calibracion_fallida", "ejercicio": act.regla.clave, "lado": act.lado, "motivo": motivo,
+                "resumen": resumen}

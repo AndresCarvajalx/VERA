@@ -407,7 +407,8 @@ export class Flujo {
     const mostrar = this.etapa === "juego";
     if (mostrar) this.etapa = "resultado";
     $("juego_hud").classList.add("oculto");
-    const guardar = r.tipo === "juego" && r.mejor != null;
+    // Una calibración interrumpida no mide el rango, pero su tiempo sí cuenta como jugado.
+    const guardar = (r.tipo === "juego" && r.mejor != null) || (r.tipo === "calibracion" && r.duracion_s > 0);
     const metaAnterior = r.meta;
     const guardado = guardar ? await this.d.guardarResumen(r) : false;
     if (!mostrar) return;
@@ -423,6 +424,7 @@ export class Flujo {
       texto: (r.mejor == null ? "No hubo medidas para guardar." : `${r.validas} de ${r.intentadas} repeticiones válidas · tu mejor: ${r.mejor}°.`) + cambio,
       botones: [{ texto: "Otro ejercicio", primario: true, id: "btn_auto", accion: () => this._elegirEjercicio() },
         ...(this.plan?.jugable ? [{ texto: "Repetir", accion: () => this._preparate() }] : []),
+        { texto: "Ver mi progreso", accion: () => this.d.irA("progreso") },
         { texto: "Terminar", accion: () => this.d.irA("menu") }],
     });
     this._autoBoton("btn_auto", "Otro ejercicio", SEGUNDOS.otro, () => this._elegirEjercicio());
@@ -476,6 +478,7 @@ export class Flujo {
         if (this.etapa === "rango") this._celebrar(`${Math.round(msg.angulo_pico)}°`, "bien");
         break;
       case "calibracion_fallida":
+        if (msg.resumen?.duracion_s > 0) this.d.guardarResumen(msg.resumen); // no mide rango, pero fue tiempo jugado
         if (this.etapa === "rango") this._falloCalibracion(msg.motivo);
         break;
       case "calibracion_lista":

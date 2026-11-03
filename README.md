@@ -38,6 +38,7 @@ Otra base de datos (p. ej. PostgreSQL): variable `BD_URL` con la URL de SQLAlche
 |---|---|---|
 | Menú de inicio | Logo VERA (`web/logo.svg`, `web/favicon.svg`), Iniciar / Manual / Ajustes. Los personajes se asoman por las esquinas y los costados, saludan con un globo de diálogo, miran hacia el cursor y se esconden; si se les hace clic, saltan y responden | `web/mascotas.js` |
 | Elige tu personaje | Los tres personajes en fila, cada uno en 3D; el elegido saluda. Abajo, quién juega y «¡A jugar!» | `web/vitrina.js`, `web/prueba.js` |
+| Mi progreso | Tiempo jugado por día, mejoría del rango por ejercicio y pierna, periodo de 7 días, 30 días o todo, y descarga en CSV (`GET /api/pacientes/<código>/diario`) | `web/mi_progreso.js`, `web/progreso.js` |
 | Manual de usuario | Cómo se juega, preparación, cada ejercicio con una demostración 3D del rango normal, tabla de límites de movimiento de Kapandji (`GET /api/rangos`), etapas de la pierna y privacidad | `web/manual.js` |
 | Ajustes | Cámaras del equipo (`GET /api/camara`), cambio de cámara o la de un celular por URL (`PUT /api/camara`, con IP Webcam o DroidCam; por USB aparece como otra cámara) y prueba en vivo con el esqueleto | `web/ajustes.js`, `vision/app/captura.py` |
 | Sesión guiada | Todo avanza solo, con temporizadores (ver abajo). Arriba, los pasos 1 Calibrar · 2 Ejercicio · 3 Tu rango · 4 ¡A jugar!; siempre a mano Pausar y Detener | `web/flujo.js` |
@@ -68,8 +69,22 @@ cada paso avanza solo con un temporizador, para que el jugador no tenga que acer
 6. **Resultado**: repeticiones válidas, mejor ángulo y la próxima meta; a los 15 s vuelve solo a
    elegir ejercicio (o «Repetir» / «Terminar»).
 
-Cada calibración y serie se guarda; «Mi progreso» (panel del fisioterapeuta) muestra el rango
-calibrado de cada sesión. «Detener» está siempre visible y detiene todo.
+«Detener» está siempre visible y detiene todo.
+
+## Progreso diario
+
+Cada calibración y serie se guarda en la base de datos (`data/amc.sqlite3`) al terminar, con su fecha
+y su duración. **Mi progreso**, desde el menú, lo agrupa por día del equipo:
+
+- **Tiempo jugado:** solo el tiempo en movimiento (`duracion_s`), sin pausas ni la espera de ponerse
+  de lado. Las calibraciones fallidas o detenidas suman tiempo, pero no cuentan como rango medido.
+- **Mejoría:** el rango calibrado de cada día (su última calibración), por ejercicio y pierna, frente
+  al rango normal.
+- **Datos antiguos:** lo guardado antes de medir la duración aparece como «sin dato»; su tiempo no se
+  estima. Una actividad cortada al cerrar la página no alcanza a guardarse.
+- **Descargar datos (CSV):** un renglón por día, con separador «;» y coma decimal para abrirlo en Excel.
+
+El panel del fisioterapeuta conserva el detalle por sesión.
 
 Parámetros de calibración y adaptación: `config/reglas_rom.json` (decisiones de diseño a validar con
 un fisioterapeuta).

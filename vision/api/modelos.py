@@ -102,6 +102,8 @@ class ResultadoEjercicio(Base):
     compensaciones: Mapped[int] = mapped_column(Integer, default=0)
     completo: Mapped[bool] = mapped_column(Boolean)
     fps_promedio: Mapped[float | None] = mapped_column(Float)
+    # Segundos en movimiento (sin pausas). Nulo en los resultados anteriores a este dato.
+    duracion_s: Mapped[float | None] = mapped_column(Float)
     # Calibración: diferencia entre los mejores intentos y si cumplieron la dispersión máxima.
     dispersion: Mapped[float | None] = mapped_column(Float)
     consistente: Mapped[bool | None] = mapped_column(Boolean)

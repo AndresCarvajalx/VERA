@@ -7,6 +7,7 @@ import { Flujo } from "./flujo.js";
 import { poseQuieta, poseSaludo } from "./guia.js";
 import { Manual } from "./manual.js";
 import { Mascotas } from "./mascotas.js";
+import { MiProgreso } from "./mi_progreso.js";
 import { dibujarProgreso } from "./progreso.js";
 import { etapaPorAvance } from "./toribara.js";
 import { Vitrina } from "./vitrina.js";
@@ -344,6 +345,7 @@ async function cargarJugadores(seleccionar) {
   const codigos = await api("GET", "/pacientes");
   const sel = $("sel_jugador");
   sel.replaceChildren(new Option("— elige —", ""), ...codigos.map((c) => new Option(c, c)));
+  $("progreso_jugador").replaceChildren(new Option("— elige —", ""), ...codigos.map((c) => new Option(c, c)));
   const elegido = seleccionar ?? recuperar("jugador");
   if (elegido && codigos.includes(elegido)) {
     sel.value = elegido;
@@ -354,6 +356,7 @@ async function cargarJugadores(seleccionar) {
 async function elegirJugador(codigo) {
   cerrarSesion();
   estado.jugador = codigo || null;
+  $("sel_jugador").value = codigo || "";
   estado.sesionId = null; // cada jugador tiene su propia sesión (y debe calibrar en ella)
   $("jugador_actual").textContent = codigo ? `Jugador ${codigo}` : "Sin jugador";
   $("jugador_actual").className = codigo ? "chip ok" : "chip";
@@ -509,6 +512,7 @@ function requiereJugador() {
 const escena = new Escena3D($("escena3d"));
 const mascotas = new Mascotas($("mascotas"), $("globo"), ["persona", "toribara", "conejibara"]);
 const ajustes = new Ajustes(api, dibujar);
+const miProgreso = new MiProgreso(api, elegirJugador, $("tooltip"));
 let manual = null; // se crea cuando llega el catálogo de ejercicios
 
 // --- pantallas -------------------------------------------------------------------
@@ -544,6 +548,7 @@ function mostrarPantalla(nombre) {
   if (nombre === "manual") manual?.mostrar(personajeElegido ?? PERSONAJE_POR_DEFECTO);
   else manual?.ocultar();
   if (nombre === "ajustes") ajustes.mostrar();
+  if (nombre === "progreso") miProgreso.mostrar(estado.jugador);
   window.scrollTo(0, 0);
 }
 
@@ -634,6 +639,8 @@ const FIN_DE_ACTIVIDAD = new Set(["calibracion_lista", "calibracion_fallida", "s
 async function manejarEvento(msg) {
   registrarEvento(msg);
   if (FIN_DE_ACTIVIDAD.has(msg.nombre)) estado.finActividad = msg.t;
+  // Una calibración fallida o interrumpida no mide el rango, pero su tiempo sí cuenta como jugado.
+  if (msg.resumen?.tipo === "calibracion" && !msg.resumen.completo && msg.resumen.duracion_s > 0) guardarResumen(msg.resumen);
   switch (msg.nombre) {
     case "vista_ok":
       mostrarMensaje("¡Bien! Ya te veo de lado. Empieza.", "ok");

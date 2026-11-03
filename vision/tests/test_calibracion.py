@@ -172,3 +172,35 @@ def test_detener_calibracion_no_es_completa():
     [ev] = ctrl.comando({"nombre": "detener"})
     assert ev["nombre"] == "ejercicio_detenido" and not ev["resumen"]["completo"]
     assert ev["resumen"]["mejor"] is None
+
+
+def test_duracion_cuenta_solo_el_tiempo_activo():
+    ctrl = Controlador()
+    ctrl.comando({"nombre": "calibrar", "ejercicio": "knee_flexion_standing", "lado": "der"})
+    _, _, t = correr(ctrl, quieto(0.0, 1100))  # esperando la vista lateral: no cuenta
+    _, _, t = correr(ctrl, quieto(0.0, 500), t0=t)
+    ctrl.comando({"nombre": "pausar"})
+    _, _, t = correr(ctrl, quieto(0.0, 3000), t0=t)  # en pausa: no cuenta
+    ctrl.comando({"nombre": "reanudar"})
+    correr(ctrl, quieto(0.0, 500), t0=t)
+    [ev] = ctrl.comando({"nombre": "detener"})
+    assert ev["resumen"]["duracion_s"] == pytest.approx(1.0, abs=0.2)
+
+
+def test_hueco_de_la_camara_no_cuenta_como_tiempo():
+    ctrl = Controlador()
+    ctrl.comando({"nombre": "calibrar", "ejercicio": "knee_flexion_standing", "lado": "der"})
+    _, _, t = correr(ctrl, quieto(0.0, 1100))
+    _, _, t = correr(ctrl, quieto(0.0, 500), t0=t)
+    correr(ctrl, quieto(0.0, 500), t0=t + 10000)
+    [ev] = ctrl.comando({"nombre": "detener"})
+    assert ev["resumen"]["duracion_s"] < 2.5
+
+
+def test_calibracion_fallida_entrega_su_tiempo():
+    ctrl = Controlador()
+    ctrl.comando({"nombre": "calibrar", "ejercicio": "knee_flexion_standing", "lado": "der"})
+    eventos, _, _ = correr(ctrl, quieto(0.0, P.tiempo_max_ms + 3000))
+    ev = [e for e in eventos if e["nombre"] == "calibracion_fallida"][0]
+    assert ev["resumen"]["duracion_s"] > 40 and not ev["resumen"]["completo"]
+    assert ctrl.actividad is None

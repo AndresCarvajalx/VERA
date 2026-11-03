@@ -375,3 +375,27 @@ code { background: rgb(0 0 0 / .35); padding: 1px 6px; border-radius: 6px; }
 .escenario-sesion .celebracion, .escenario-sesion .destello { z-index: 3; }
 .escenario-sesion .aviso { z-index: 5; top: auto; bottom: 18px; }
 .escenario-sesion:has(.juego-hud:not(.oculto)) .aviso { bottom: 150px; } /* sobre el HUD de repeticiones */
+
+/* Mi progreso */
+.mi-progreso { display: grid; gap: 16px; padding: 0 24px 40px; }
+.mi-progreso #contenido_progreso { display: grid; gap: 16px; }
+.mi-progreso #contenido_progreso.oculto { display: none; }
+.mi-progreso .nota.oculto { display: none; }
+.filtros-progreso { display: flex; flex-wrap: wrap; align-items: end; gap: 14px; }
+.filtros-progreso label { display: flex; flex-direction: column; gap: 4px; font-size: .82rem; color: var(--suave); }
+.filtros-progreso select { font: inherit; color: var(--texto); background: rgb(0 0 0 / .3); border: 2px solid var(--borde);
+                           border-radius: 12px; padding: 7px 10px; min-width: 160px; }
+.filtros-progreso select option { background: var(--panel-solido); }
+.periodo { display: flex; gap: 6px; }
+.periodo button[aria-checked="true"] { border-color: var(--cian); box-shadow: var(--brillo-cian); }
+#btn_descargar_progreso { margin-left: auto; }
+.cifras-progreso { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.cifras-progreso div { display: flex; flex-direction: column; gap: 2px; padding: 12px 16px; border-radius: 18px;
+                       background: var(--panel); border: 2px solid var(--borde); }
+.cifras-progreso strong { font-size: 1.5rem; font-variant-numeric: tabular-nums; color: var(--texto); }
+.grafica-tiempo { width: 100%; min-height: 240px; }
+.grafica-tiempo .grafica { margin: 0; }
+.columna-tiempo { fill: var(--cian); transition: fill .1s; }
+.columna-tiempo.activa { fill: #8ff3ff; }
+.valor-columna { fill: var(--texto); font-size: 12px; font-weight: 700; }
+.titulo-mejoria { font-size: 1.4rem; margin: 8px 0 0; }

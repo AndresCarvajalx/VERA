@@ -1,9 +1,13 @@
+from datetime import datetime, timedelta, timezone
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy import update
 from sqlalchemy.pool import StaticPool
 
 from api import bd
+from api.modelos import ResultadoEjercicio
 from api.rutas import rutas
 
 
@@ -301,3 +305,64 @@ def test_cada_personaje_tiene_modelo_y_retrato():
 def test_jugador_inexistente(cliente):
     assert cliente.post("/api/sesiones", json={"paciente": "NADIE"}).status_code == 404
     assert cliente.get("/api/pacientes/NADIE/progreso").status_code == 404
+
+
+# --- progreso diario -----------------------------------------------------------
+def mover_a(dias_atras):
+    """Pasa los resultados aún sin mover a otra fecha (la API siempre guarda con la hora actual)."""
+    fecha = datetime.now(timezone.utc) - timedelta(days=dias_atras)
+    with bd._fabrica() as sesion:
+        sesion.execute(update(ResultadoEjercicio).where(ResultadoEjercicio.fps_promedio != 1).values(
+            fecha=fecha, fps_promedio=1))
+        sesion.commit()
+    return fecha.astimezone().date().isoformat()
+
+
+def test_diario_suma_tiempo_y_repeticiones_por_dia(cliente):
+    crear_jugador(cliente)
+    sesion = nueva_sesion(cliente)
+    guardar(cliente, sesion, calibracion(40.0, duracion_s=20.0))
+    guardar(cliente, sesion, resultado(duracion_s=60.5))
+    ayer = mover_a(1)
+    sesion = nueva_sesion(cliente)
+    guardar(cliente, sesion, calibracion(48.0, duracion_s=15.0))
+    guardar(cliente, sesion, resultado(duracion_s=30.0))
+    guardar(cliente, sesion, resultado(duracion_s=30.0))
+    hoy = mover_a(0)
+    d = cliente.get("/api/pacientes/AMC-001/diario").json()
+    assert [x["dia"] for x in d["dias"]] == [ayer, hoy]
+    assert d["dias"][0] | {"dia": 0} == {"dia": 0, "segundos": 80.5, "series": 1, "calibraciones": 1,
+                                         "validas": 3, "intentadas": 4, "sin_tiempo": 0}
+    assert d["dias"][1]["segundos"] == 75.0
+    assert d["dias"][1]["series"] == 2
+    serie = d["series"][0]
+    assert [(p["dia"], p["mejor"], p["partidas"]) for p in serie["puntos"]] == [(ayer, 40.0, 1), (hoy, 48.0, 2)]
+    assert serie["mejora"] == 8.0
+
+
+def test_diario_un_punto_por_dia_aunque_haya_varias_sesiones(cliente):
+    crear_jugador(cliente)
+    guardar(cliente, nueva_sesion(cliente), calibracion(40.0))
+    guardar(cliente, nueva_sesion(cliente), calibracion(44.0))
+    d = cliente.get("/api/pacientes/AMC-001/diario").json()
+    assert [p["mejor"] for p in d["series"][0]["puntos"]] == [44.0]  # la última del día
+    assert len(cliente.get("/api/pacientes/AMC-001/progreso").json()[0]["puntos"]) == 2  # una por sesión
+
+
+def test_diario_no_estima_el_tiempo_de_resultados_antiguos(cliente):
+    crear_jugador(cliente)
+    guardar(cliente, nueva_sesion(cliente), resultado())
+    dia = cliente.get("/api/pacientes/AMC-001/diario").json()["dias"][0]
+    assert (dia["segundos"], dia["sin_tiempo"]) == (0.0, 1)
+
+
+def test_calibracion_incompleta_cuenta_tiempo_pero_no_rango(cliente):
+    crear_jugador(cliente)
+    guardar(cliente, nueva_sesion(cliente), calibracion(40.0, completo=False, duracion_s=12.0))
+    d = cliente.get("/api/pacientes/AMC-001/diario").json()
+    assert (d["dias"][0]["segundos"], d["dias"][0]["calibraciones"], d["series"]) == (12.0, 0, [])
+
+
+def test_diario_de_jugador_sin_datos(cliente):
+    crear_jugador(cliente)
+    assert cliente.get("/api/pacientes/AMC-001/diario").json() == {"dias": [], "series": []}

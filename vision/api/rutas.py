@@ -1,6 +1,7 @@
 """Rutas REST de la API de datos: catálogo, jugadores, metas, sesiones, resultados y progreso."""
 import re
 import statistics
+from collections.abc import Callable
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -80,6 +81,7 @@ class ResultadoEntrada(BaseModel):
     compensaciones: int = 0
     completo: bool
     fps_promedio: float | None = None
+    duracion_s: float | None = Field(default=None, ge=0)
     repeticiones: list[RepeticionEntrada] = []
     # Solo en calibraciones: el pico sostenido de cada intento y qué tan parecidos fueron.
     intentos: list[float] = []
@@ -91,6 +93,11 @@ class ResultadoEntrada(BaseModel):
 def _iso(fecha: datetime) -> str:
     """SQLite devuelve las fechas sin zona; se guardaron en UTC y así se informan al navegador."""
     return (fecha if fecha.tzinfo else fecha.replace(tzinfo=timezone.utc)).isoformat()
+
+
+def _dia(fecha: datetime) -> str:
+    """El día del jugador: el servicio corre en su mismo equipo, así que vale la zona horaria local."""
+    return (fecha if fecha.tzinfo else fecha.replace(tzinfo=timezone.utc)).astimezone().date().isoformat()
 
 
 def _paciente(bd: Session, codigo: str) -> Paciente:
@@ -243,6 +250,7 @@ def guardar_resultado(sesion_id: int, datos: ResultadoEntrada, bd: Session = Dep
         meta=datos.meta, angulo_max=datos.angulo_max, angulo_min=datos.angulo_min, rango=datos.rango,
         mejor=datos.mejor, reposo=datos.reposo, validas=datos.validas, intentadas=datos.intentadas,
         compensaciones=datos.compensaciones, completo=datos.completo, fps_promedio=datos.fps_promedio,
+        duracion_s=datos.duracion_s,
         dispersion=datos.dispersion, consistente=datos.consistente, repeticiones=repeticiones)
     bd.add(resultado)
     bd.commit()
@@ -362,25 +370,53 @@ def plan(codigo: str, ejercicio: str, lado: str, sesion: int | None = None,
 # --- progreso -----------------------------------------------------------------
 @rutas.get("/pacientes/{codigo}/progreso")
 def progreso(codigo: str, bd: Session = Depends(sesion_bd)) -> list[dict]:
-    """Por ejercicio y pierna: el rango calibrado en cada sesión, desde la primera.
+    """Por ejercicio y pierna: el rango calibrado en cada sesión, desde la primera."""
+    return _series(bd, _paciente(bd, codigo), lambda r: r.sesion_id)
+
+
+@rutas.get("/pacientes/{codigo}/diario")
+def diario(codigo: str, bd: Session = Depends(sesion_bd)) -> dict:
+    """Lo jugado cada día (tiempo, series, repeticiones) y el rango calibrado de cada día.
+
+    `sin_tiempo`: resultados guardados antes de medir la duración; su tiempo no se conoce y no se estima.
+    """
+    paciente = _paciente(bd, codigo)
+    dias: dict[str, dict] = {}
+    for r in bd.scalars(select(ResultadoEjercicio).join(Sesion).where(Sesion.paciente_id == paciente.id)):
+        dia = dias.setdefault(_dia(r.fecha), {"dia": _dia(r.fecha), "segundos": 0.0, "series": 0, "calibraciones": 0,
+                                              "validas": 0, "intentadas": 0, "sin_tiempo": 0})
+        if r.duracion_s is None:
+            dia["sin_tiempo"] += 1
+        else:
+            dia["segundos"] = round(dia["segundos"] + r.duracion_s, 1)
+        if r.tipo == "juego":
+            dia["series"] += 1
+            dia["validas"] += r.validas or 0
+            dia["intentadas"] += r.intentadas or 0
+        elif r.completo:
+            dia["calibraciones"] += 1
+    return {"dias": [dias[d] for d in sorted(dias)], "series": _series(bd, paciente, lambda r: _dia(r.fecha))}
+
+
+def _series(bd: Session, paciente: Paciente, grupo: Callable[[ResultadoEjercicio], object]) -> list[dict]:
+    """Una serie por ejercicio y pierna, con un punto por `grupo` (sesión o día).
 
     La medida de progreso es la calibración (mediana de picos sostenidos de varios intentos),
     no el mejor fotograma de una partida, que puede incluir picos sueltos. Cada punto lleva
-    además el resumen de las partidas de esa sesión. `mejora`: grados ganados, positivo = avance.
+    además el resumen de las partidas de ese grupo. `mejora`: grados ganados, positivo = avance.
     """
-    paciente = _paciente(bd, codigo)
     reglas = cargar().ejercicios
     juegos: dict[tuple, list[ResultadoEjercicio]] = {}
     for j in bd.scalars(select(ResultadoEjercicio).join(Sesion).where(
             Sesion.paciente_id == paciente.id, ResultadoEjercicio.tipo == "juego")):
-        juegos.setdefault((j.sesion_id, j.ejercicio_clave, j.lado), []).append(j)
+        juegos.setdefault((grupo(j), j.ejercicio_clave, j.lado), []).append(j)
 
-    # Un punto por sesión: si se calibró varias veces, cuenta la última (la que usó el juego).
-    por_sesion: dict[tuple, ResultadoEjercicio] = {}
+    # Un punto por grupo: si se calibró varias veces, cuenta la última (la que usó el juego).
+    por_grupo: dict[tuple, ResultadoEjercicio] = {}
     for c in _calibraciones(bd, paciente.id):
-        por_sesion[(c.sesion_id, c.ejercicio_clave, c.lado)] = c
+        por_grupo[(grupo(c), c.ejercicio_clave, c.lado)] = c
     series: dict[tuple[str, str], dict] = {}
-    for c in sorted(por_sesion.values(), key=lambda r: (r.fecha, r.id)):
+    for c in sorted(por_grupo.values(), key=lambda r: (r.fecha, r.id)):
         regla = reglas.get(c.ejercicio_clave)
         if not regla:
             continue
@@ -391,9 +427,10 @@ def progreso(codigo: str, bd: Session = Depends(sesion_bd)) -> list[dict]:
             "referencia": regla.max_fisiologico if regla.direccion == "arriba" else 0,
             "puntos": [],
         })
-        partidas = juegos.get((c.sesion_id, c.ejercicio_clave, c.lado), [])
+        partidas = juegos.get((grupo(c), c.ejercicio_clave, c.lado), [])
         serie["puntos"].append({
-            "fecha": _iso(c.fecha), "mejor": c.mejor, "reposo": c.reposo, "consistente": c.consistente,
+            "fecha": _iso(c.fecha), "dia": _dia(c.fecha), "mejor": c.mejor, "reposo": c.reposo,
+            "consistente": c.consistente,
             "partidas": len(partidas),
             "validas": sum(p.validas or 0 for p in partidas),
             "intentadas": sum(p.intentadas or 0 for p in partidas),
