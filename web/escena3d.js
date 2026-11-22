@@ -2,24 +2,35 @@
 // (repite el ejercicio de referencia) uno al lado del otro sobre un piso.
 import * as THREE from "./vendor/three.module.min.js";
 import { Avatar, esqueletoEstable } from "./avatar.js";
-import { cicloGuia, poseGuia } from "./guia.js";
+import { Confeti, Ondas, entornoLuminoso, halo } from "./efectos3d.js";
+import { Escenario } from "./escenario.js";
+import { cicloGuia, poseGuia, poseSaludo } from "./guia.js";
 import { Toribara, cargarModelo } from "./toribara.js";
 
 const SEPARACION = 0.75; // metros desde el centro a cada avatar
 
+// Color de una variable del tema ya resuelto a rgb(): en el tema profesional las variables son
+// pares light-dark() y Three.js no los entiende. Se resuelve dentro del escenario, que es siempre oscuro.
+const resueltos = new Map();
+let sonda = null;
 function token(nombre) {
-  return getComputedStyle(document.documentElement).getPropertyValue(nombre).trim();
+  if (!resueltos.has(nombre)) {
+    sonda.style.color = `var(${nombre})`;
+    resueltos.set(nombre, getComputedStyle(sonda).color);
+  }
+  return resueltos.get(nombre);
 }
 
 export class Escena3D {
   constructor(contenedor) {
     this.contenedor = contenedor;
+    sonda = contenedor.appendChild(Object.assign(document.createElement("span"), { hidden: true }));
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     contenedor.appendChild(this.renderer.domElement);
 
     this.escena = new THREE.Scene();
-    this.camara = new THREE.PerspectiveCamera(35, 1, 0.1, 50);
+    this.camara = new THREE.PerspectiveCamera(35, 1, 0.1, 90);
     this.camara.position.set(0, 1.15, 4.3);
     this.camara.lookAt(0, 0.85, 0);
 
@@ -40,16 +51,28 @@ export class Escena3D {
       new THREE.MeshStandardMaterial({ color: token("--piso"), roughness: 0.6, metalness: 0.2 }),
     );
     piso.rotation.x = -Math.PI / 2;
+    piso.receiveShadow = true;
     this.escena.add(piso);
-    for (const [radio, color] of [[2.55, token("--rosa")], [1.6, token("--cian")]]) {
+    this.piso = piso;
+    this.aros = [[2.55, "--rosa"], [1.6, "--cian"]].map(([radio, variable]) => {
       const aro = new THREE.Mesh(
         new THREE.RingGeometry(radio - 0.04, radio, 96),
-        new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.85 }),
+        new THREE.MeshBasicMaterial({ color: token(variable), transparent: true, opacity: 0.85 }),
       );
       aro.rotation.x = -Math.PI / 2;
       aro.position.y = 0.002;
+      aro.userData.variable = variable;
       this.escena.add(aro);
-    }
+      return aro;
+    });
+    this.escenario = new Escenario(this.escena, this.renderer, token, SEPARACION);
+    this.halosAros = this.aros.map((aro, i) => halo(aro, new THREE.RingGeometry(i ? 1.5 : 2.45, i ? 1.7 : 2.65, 96), 0.2));
+    this.escena.environment = entornoLuminoso(this.renderer, [token("--guia"), token("--avatar")]);
+    this.confeti = new Confeti(this.escena);
+    this.ondas = new Ondas(this.escena);
+    this.sobrio = false;
+    this._festejo = null; // {hasta, brazo}: la guía deja el ejercicio y celebra un momento
+    this._anterior = performance.now();
 
     // El jugador a la derecha de la pantalla y la guía, translúcida, a la izquierda.
     this.jugador = new Avatar(this.escena, { color: token("--avatar") });
@@ -67,7 +90,7 @@ export class Escena3D {
     this.etapas = {};
     this.personaje = null;
     this._pedido = 0; // descarta cargas viejas si se elige otro personaje antes de que termine
-    this.cambiarPersonaje("persona"); // personaje por defecto; la página lo cambia según el jugador
+    this.listo = this.cambiarPersonaje("persona"); // personaje por defecto; la página lo cambia según el jugador
 
     this.ejercicioGuia = { articulacion: "rodilla", lado: "der", sentido: 1, objetivo: 20, tiempo_sostenido_ms: 500 };
     this.faseGuia = "";
@@ -86,12 +109,48 @@ export class Escena3D {
     else { this.camara.position.set(0, 1.15, 4.3); this.camara.lookAt(0, 0.85, 0); }
   }
 
+  /** El tema cambió: se vuelven a leer los colores. `sobrio` = tema profesional. */
+  cambiarTema(sobrio) {
+    this.sobrio = sobrio;
+    resueltos.clear();
+    this.piso.material.color.set(sobrio ? "#1a2230" : token("--piso"));
+    for (const aro of this.aros) {
+      aro.material.color.set(token(aro.userData.variable));
+      aro.material.opacity = sobrio ? 0.5 : 0.85;
+    }
+    for (const h of this.halosAros) h.actualizar(sobrio ? 0 : 1);
+    this.escenario.colorear(sobrio);
+  }
+
+  /** Lugar del escenario: "ciudad", "playa" o "espacio" (se desbloquean jugando, ver prueba.js). */
+  cambiarAmbiente(nombre) {
+    this.escenario.ambiente(nombre);
+  }
+
+  /** Destello del decorado al terminar una repetición ("perfecto", "bien", "casi", "mal") o la serie. */
+  celebrar(calidad) {
+    const variable = { perfecto: "--ok", bien: "--resalte", serie: "--ok" }[calidad];
+    if (!variable) return;
+    this.escenario.destello(token(variable), calidad === "bien" ? 0.6 : 1);
+    // La guía festeja: saluda con el brazo del lado de afuera (un momento más largo al terminar la serie).
+    this._festejo = { hasta: performance.now() + (calidad === "serie" ? 2600 : 1300), brazo: -1 };
+    if (this.sobrio) return; // el tema profesional no lleva confeti
+    const x = this.jugador.grupo.position.x;
+    this.ondas.lanzar(x, token(variable));
+    const colores = [token("--rosa"), token("--cian"), token("--amarillo"), token("--lima"), "#ffffff"];
+    if (calidad === "perfecto") this.confeti.lanzar(new THREE.Vector3(x, 1.9, 0), colores, 45, 0.8);
+    if (calidad === "serie") {
+      this.confeti.lanzar(new THREE.Vector3(x, 2.1, 0), colores, 110, 1.2);
+      this.confeti.lanzar(new THREE.Vector3(-x, 2.1, 0), colores, 110, 1.2);
+    }
+  }
+
   /** Lleva el mismo lienzo a otro contenedor (sesión guiada ↔ panel del fisioterapeuta). */
   moverA(contenedor) {
     if (contenedor === this.contenedor) return;
     this._observador.unobserve(this.contenedor);
     this.contenedor = contenedor;
-    contenedor.appendChild(this.renderer.domElement);
+    contenedor.append(this.renderer.domElement, sonda);
     this._observador.observe(contenedor);
     this._ajustarTamano();
   }
@@ -104,7 +163,7 @@ export class Escena3D {
 
   /**
    * Pone al jugador y a la guía con el personaje elegido (modelado/generar_personajes.py:
-   * "persona", "toribara", "conejibara"). Si el modelo no carga, se conservan los personajes actuales
+   * "persona", "mujer", "toribara", "conejibara"). Si el modelo no carga, se conservan los personajes actuales
    * (al principio, los avatares de cilindros). Devuelve true si el cambio se hizo.
    */
   async cambiarPersonaje(clave) {
@@ -175,13 +234,21 @@ export class Escena3D {
   }
 
   _cuadro() {
+    const ahora = performance.now();
+    const dt = Math.min(0.05, (ahora - this._anterior) / 1000);
+    this._anterior = ahora;
     const ej = this.ejercicioGuia;
-    const { grados, fase } = cicloGuia(performance.now() - this._inicio, ej.objetivo, ej.tiempo_sostenido_ms);
-    const { pts, sentado } = poseGuia(ej, grados);
+    const { grados, fase } = cicloGuia(ahora - this._inicio, ej.objetivo, ej.tiempo_sostenido_ms);
+    const festeja = this._festejo && ahora < this._festejo.hasta;
+    const { pts, sentado } = festeja ? { pts: poseSaludo(ahora, this._festejo.brazo), sentado: false } : poseGuia(ej, grados);
     this.guia.actualizar(pts);
-    this.guia.resaltar(ej.articulacion, ej.lado, fase === "sostén" ? token("--ok") : token("--resalte"));
+    this.guia.resaltar(ej.articulacion, ej.lado, festeja || fase === "sostén" ? token("--ok") : token("--resalte"));
     this.silla.visible = sentado;
+    this.confeti.animar(dt);
+    this.ondas.animar(dt);
     this.jugador.animar?.(performance.now());
+    this.guia.animar?.(performance.now());
+    this.escenario.animar(performance.now());
     this.faseGuia = ej.objetivo === 0 ? "quieta" : fase;
     this.renderer.render(this.escena, this.camara);
   }

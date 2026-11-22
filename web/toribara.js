@@ -11,6 +11,7 @@
 import * as THREE from "./vendor/three.module.min.js";
 import { GLTFLoader } from "./vendor/addons/loaders/GLTFLoader.js";
 import { P } from "./avatar.js";
+import { estiloCaricatura } from "./estilo_toon.js";
 
 // Todos los personajes se muestran con la misma altura en la escena (la persona mide 1.70 m y los
 // capibaras ~1.35 m con la cabeza), igual que el avatar de cilindros.
@@ -88,8 +89,12 @@ export class Toribara {
       if (o.isMesh) {
         o.frustumCulled = false; // el esqueleto mueve la malla fuera de su caja original
         o.material = o.material.clone();
+        o.castShadow = !guia; // la guía es un holograma: no proyecta sombra
+        o.material.envMapIntensity = 0.55;
       }
     });
+    // El jugador, en estilo caricatura con contorno; la guía queda como holograma translúcido.
+    if (!guia) estiloCaricatura(this.modelo);
     this.materialesPierna = {};
     this.modelo.traverse((o) => {
       if (o.isMesh && o.material.name.startsWith("pelaje_pierna_")) {
@@ -117,6 +122,7 @@ export class Toribara {
       o.material.transparent = true;
       o.material.opacity = 0.72;
       o.material.depthWrite = false;
+      (this._holograma ??= []).push(o.material);
     });
   }
 
@@ -199,7 +205,12 @@ export class Toribara {
 
   /** Se llama en cada cuadro: combina el resalte del ejercicio con el brillo de la etapa. */
   animar(t) {
-    if (this.guia) return;
+    if (this.guia) {
+      // El holograma respira: su brillo sube y baja despacio.
+      const brillo = 0.35 + 0.12 * Math.sin(t / 700);
+      for (const m of this._holograma ?? []) m.emissiveIntensity = brillo;
+      return;
+    }
     for (const m of Object.values(this.materialesPierna)) {
       const { resalte, etapa } = m.userData;
       if (resalte) {

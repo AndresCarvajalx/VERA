@@ -2,7 +2,7 @@
 import re
 import statistics
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -13,14 +13,15 @@ from app.reglas import cargar
 
 from .adaptacion import Serie, calcular_plan
 from .bd import sesion_bd
-from .modelos import (Consentimiento, Ejercicio, MedicionReferencia, ObjetivoAngular, Paciente, Repeticion,
-                      ResultadoEjercicio, Sesion, ahora)
+from .modelos import (Consentimiento, EncuestaSUS, Ejercicio, MedicionReferencia, ObjetivoAngular, Paciente,
+                      Repeticion, ResultadoEjercicio, Sesion, ahora)
 
 rutas = APIRouter()
 
 # Personajes elegibles; sus modelos los genera modelado/generar_personajes.py en web/modelos/.
 PERSONAJES = {
     "persona": {"nombre": "Persona", "descripcion": "Deportista en ropa de entrenamiento."},
+    "mujer": {"nombre": "Mujer", "descripcion": "Deportista con cola de caballo y ropa de entrenamiento."},
     "toribara": {"nombre": "Toribara", "descripcion": "Mitad toro, mitad capibara: cuernos, mechón y pezuñas."},
     "conejibara": {"nombre": "Conejibara", "descripcion": "Mitad conejo, mitad capibara: orejas largas y cola de pompón."},
 }
@@ -54,7 +55,14 @@ class NuevaSesion(BaseModel):
 
 
 class CierreSesion(BaseModel):
-    latencia_promedio_ms: float | None = None
+    latencia_promedio_ms: float | None = Field(None, ge=0, le=60000)
+    latencia_p95_ms: float | None = Field(None, ge=0, le=60000)
+    fps_promedio: float | None = Field(None, ge=0, le=240)
+    terminar: bool = True  # False: solo actualiza el rendimiento (la sesión sigue abierta)
+
+
+class RespuestasSUS(BaseModel):
+    respuestas: list[int] = Field(min_length=10, max_length=10, description="Diez respuestas de 1 a 5, en orden.")
 
 
 class RepeticionEntrada(BaseModel):
@@ -228,10 +236,13 @@ def cerrar_sesion(sesion_id: int, datos: CierreSesion, bd: Session = Depends(ses
     sesion = bd.get(Sesion, sesion_id)
     if not sesion:
         raise HTTPException(404, "Sesión no encontrada")
-    sesion.fin = ahora()
-    sesion.latencia_promedio_ms = datos.latencia_promedio_ms
+    if datos.terminar:
+        sesion.fin = ahora()
+    for campo in ("latencia_promedio_ms", "latencia_p95_ms", "fps_promedio"):
+        if getattr(datos, campo) is not None:
+            setattr(sesion, campo, getattr(datos, campo))
     bd.commit()
-    return {"id": sesion.id, "fin": _iso(sesion.fin)}
+    return {"id": sesion.id, "fin": _iso(sesion.fin) if sesion.fin else None}
 
 
 @rutas.post("/sesiones/{sesion_id}/resultados", status_code=201)
@@ -338,6 +349,77 @@ def precision(codigo: str, bd: Session = Depends(sesion_bd)) -> dict:
     }
 
 
+# --- encuesta de usabilidad e indicadores técnicos (OE4) ---------------------------
+META_SUS = 68.0
+META_FPS = 15.0
+META_LATENCIA_MS = 200.0
+
+
+def puntaje_sus(respuestas: list[int]) -> float:
+    """SUS: las afirmaciones impares son positivas (respuesta − 1) y las pares negativas (5 − respuesta)."""
+    if len(respuestas) != 10 or any(not 1 <= r <= 5 for r in respuestas):
+        raise ValueError("Se necesitan 10 respuestas de 1 a 5")
+    return sum(r - 1 if i % 2 == 0 else 5 - r for i, r in enumerate(respuestas)) * 2.5
+
+
+@rutas.post("/pacientes/{codigo}/sus", status_code=201)
+def guardar_sus(codigo: str, datos: RespuestasSUS, bd: Session = Depends(sesion_bd)) -> dict:
+    paciente = _paciente(bd, codigo)
+    try:
+        puntaje = puntaje_sus(datos.respuestas)
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from None
+    encuesta = EncuestaSUS(paciente_id=paciente.id, respuestas=",".join(map(str, datos.respuestas)), puntaje=puntaje)
+    bd.add(encuesta)
+    bd.commit()
+    return {"id": encuesta.id, "puntaje": puntaje, "cumple_meta": puntaje >= META_SUS}
+
+
+@rutas.get("/pacientes/{codigo}/sus")
+def ver_sus(codigo: str, bd: Session = Depends(sesion_bd)) -> dict:
+    paciente = _paciente(bd, codigo)
+    ultima = bd.scalar(select(EncuestaSUS).where(EncuestaSUS.paciente_id == paciente.id).order_by(EncuestaSUS.fecha.desc()))
+    return {"respondida": ultima is not None, "puntaje": ultima.puntaje if ultima else None,
+            "fecha": _iso(ultima.fecha) if ultima else None}
+
+
+def _media(valores: list[float]) -> float | None:
+    return round(sum(valores) / len(valores), 1) if valores else None
+
+
+@rutas.get("/indicadores")
+def indicadores(bd: Session = Depends(sesion_bd)) -> dict:
+    """Indicadores técnicos del OE4 con los datos de todos los jugadores: precisión frente al goniómetro,
+    fluidez (FPS), latencia y usabilidad (SUS). Para el informe técnico; no contiene datos clínicos."""
+    mediciones = list(bd.scalars(select(MedicionReferencia)))
+    por_articulacion: dict[str, list[tuple[float, float]]] = {}
+    for m in mediciones:
+        por_articulacion.setdefault(m.articulacion, []).append((m.angulo_goniometro, m.angulo_sistema))
+    fps = [r.fps_promedio for r in bd.scalars(select(ResultadoEjercicio)) if r.fps_promedio]
+    latencias = [s.latencia_promedio_ms for s in bd.scalars(select(Sesion)) if s.latencia_promedio_ms is not None]
+    p95 = [s.latencia_p95_ms for s in bd.scalars(select(Sesion)) if s.latencia_p95_ms is not None]
+    # La última encuesta de cada jugador: si la respondió dos veces, cuenta su opinión más reciente.
+    ultimas: dict[int, EncuestaSUS] = {}
+    for e in bd.scalars(select(EncuestaSUS).order_by(EncuestaSUS.fecha)):
+        ultimas[e.paciente_id] = e
+    sus = [e.puntaje for e in ultimas.values()]
+    porcentaje = lambda valores, cumple: round(100 * sum(map(cumple, valores)) / len(valores)) if valores else None
+    return {
+        "precision": {
+            "meta": META_ERROR_ABSOLUTO_MEDIO,
+            "total": resumen_errores([(m.angulo_goniometro, m.angulo_sistema) for m in mediciones]) if mediciones else None,
+            "por_articulacion": {a: resumen_errores(p) for a, p in sorted(por_articulacion.items())},
+            "jugadores": len({bd.get(Sesion, m.sesion_id).paciente_id for m in mediciones}),
+        },
+        "fps": {"meta": META_FPS, "n": len(fps), "promedio": _media(fps), "minimo": round(min(fps), 1) if fps else None,
+                "porcentaje_cumple": porcentaje(fps, lambda v: v >= META_FPS)},
+        "latencia": {"meta": META_LATENCIA_MS, "n": len(latencias), "promedio": _media(latencias), "p95_promedio": _media(p95),
+                     "porcentaje_cumple": porcentaje(latencias, lambda v: v <= META_LATENCIA_MS)},
+        "sus": {"meta": META_SUS, "n": len(sus), "promedio": _media(sus),
+                "porcentaje_cumple": porcentaje(sus, lambda v: v >= META_SUS)},
+    }
+
+
 # --- plan adaptado --------------------------------------------------------------
 @rutas.get("/pacientes/{codigo}/plan")
 def plan(codigo: str, ejercicio: str, lado: str, sesion: int | None = None,
@@ -396,6 +478,62 @@ def diario(codigo: str, bd: Session = Depends(sesion_bd)) -> dict:
         elif r.completo:
             dia["calibraciones"] += 1
     return {"dias": [dias[d] for d in sorted(dias)], "series": _series(bd, paciente, lambda r: _dia(r.fecha))}
+
+
+def rachas(dias: set[date], hoy: date) -> tuple[int, int]:
+    """(racha actual, mejor racha) en días seguidos jugados.
+
+    La racha actual sigue viva si el último día jugado fue hoy o ayer: hoy todavía puede jugar.
+    """
+    mejor = actual = 0
+    anterior = None
+    for d in sorted(dias):
+        actual = actual + 1 if anterior is not None and d - anterior == timedelta(days=1) else 1
+        mejor, anterior = max(mejor, actual), d
+    viva = anterior is not None and hoy - anterior <= timedelta(days=1)
+    return (actual if viva else 0), mejor
+
+
+# (clave, nombre, descripción, icono, meta). El progreso de cada uno se calcula en `logros`.
+LOGROS = [
+    ("primera_serie", "Primera serie", "Completa tu primera serie del juego.", "medalla", 1),
+    ("sin_fallos", "Sin fallos", "Completa una serie en la que todas las repeticiones cuenten.", "diana", 1),
+    ("racha_3", "Tres días seguidos", "Juega tres días seguidos.", "llama", 3),
+    ("racha_7", "Una semana seguida", "Juega siete días seguidos.", "llama", 7),
+    ("series_10", "Diez series", "Completa diez series del juego.", "medalla", 10),
+    ("rango_5", "Cinco grados más", "Gana 5° de rango en un ejercicio desde tu primera calibración.", "grafica", 5),
+    ("rango_15", "Quince grados más", "Gana 15° de rango en un ejercicio desde tu primera calibración.", "grafica", 15),
+    ("todos", "Explorador", "Calibra los cuatro ejercicios.", "estrella", 4),
+    ("tiempo_30", "Media hora en movimiento", "Suma 30 minutos de ejercicio.", "reloj", 30),
+]
+
+
+@rutas.get("/pacientes/{codigo}/logros")
+def logros(codigo: str, bd: Session = Depends(sesion_bd)) -> dict:
+    """Racha de días seguidos y logros (obtenidos o con su avance), calculados de lo guardado."""
+    paciente = _paciente(bd, codigo)
+    resultados = list(bd.scalars(select(ResultadoEjercicio).join(Sesion).where(Sesion.paciente_id == paciente.id)))
+    dias = {date.fromisoformat(_dia(r.fecha)) for r in resultados}
+    actual, mejor = rachas(dias, datetime.now().astimezone().date())
+    series = [r for r in resultados if r.tipo == "juego" and r.completo]
+    calibrados = {r.ejercicio_clave for r in resultados if r.tipo == "calibracion" and r.completo and r.mejor is not None}
+    mejoras = [s["mejora"] for s in _series(bd, paciente, lambda r: r.id)]
+    avance = {
+        "primera_serie": len(series),
+        "sin_fallos": int(any(r.validas and r.validas == r.intentadas for r in series)),
+        "racha_3": mejor, "racha_7": mejor,
+        "series_10": len(series),
+        "rango_5": max(mejoras, default=0), "rango_15": max(mejoras, default=0),
+        "todos": len(calibrados & set(cargar().ejercicios)),
+        "tiempo_30": sum(r.duracion_s or 0 for r in resultados) / 60,
+    }
+    return {
+        "racha": actual, "mejor_racha": mejor, "dias_jugados": len(dias),
+        "jugo_hoy": datetime.now().astimezone().date() in dias,
+        "logros": [{"clave": clave, "nombre": nombre, "descripcion": descripcion, "icono": icono, "meta": meta,
+                    "avance": round(min(max(avance[clave], 0), meta), 1), "obtenido": avance[clave] >= meta}
+                   for clave, nombre, descripcion, icono, meta in LOGROS],
+    }
 
 
 def _series(bd: Session, paciente: Paciente, grupo: Callable[[ResultadoEjercicio], object]) -> list[dict]:

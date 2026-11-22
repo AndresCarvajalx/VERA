@@ -285,7 +285,7 @@ def test_rangos_de_referencia_de_kapandji(cliente):
 
 def test_personajes_elegibles(cliente):
     claves = [p["clave"] for p in cliente.get("/api/personajes").json()]
-    assert claves == ["persona", "toribara", "conejibara"]
+    assert claves == ["persona", "mujer", "toribara", "conejibara"]
     crear_jugador(cliente)
     assert cliente.get("/api/pacientes/AMC-001").json()["personaje"] == "persona"  # por defecto
     assert cliente.patch("/api/pacientes/AMC-001", json={"personaje": "conejibara"}).status_code == 200
@@ -366,3 +366,91 @@ def test_calibracion_incompleta_cuenta_tiempo_pero_no_rango(cliente):
 def test_diario_de_jugador_sin_datos(cliente):
     crear_jugador(cliente)
     assert cliente.get("/api/pacientes/AMC-001/diario").json() == {"dias": [], "series": []}
+
+
+# --- racha y logros ------------------------------------------------------------------
+
+def test_racha_de_dias_seguidos():
+    from datetime import date
+
+    from api.rutas import rachas
+    hoy = date(2026, 11, 17)
+    dias = lambda *atras: {hoy - timedelta(days=d) for d in atras}
+    assert rachas(set(), hoy) == (0, 0)
+    assert rachas(dias(0, 1, 2), hoy) == (3, 3)
+    assert rachas(dias(1, 2), hoy) == (2, 2)  # hoy todavía no juega: la racha sigue viva
+    assert rachas(dias(2, 3, 4, 5), hoy) == (0, 4)  # ayer no jugó: se cortó, pero queda su mejor racha
+    assert rachas(dias(0, 2, 3), hoy) == (1, 2)
+
+
+def test_logros_se_calculan_de_lo_guardado(cliente):
+    crear_jugador(cliente)
+    sesion = nueva_sesion(cliente)
+    guardar(cliente, sesion, calibracion(40.0, duracion_s=20.0))
+    guardar(cliente, sesion, resultado(duracion_s=60.0))  # 3 de 4 válidas
+    mover_a(1)
+    sesion = nueva_sesion(cliente)
+    guardar(cliente, sesion, calibracion(47.0, duracion_s=20.0))
+    guardar(cliente, sesion, resultado(validas=5, intentadas=5, duracion_s=60.0))
+    mover_a(0)
+    datos = cliente.get("/api/pacientes/AMC-001/logros").json()
+    assert (datos["racha"], datos["mejor_racha"], datos["jugo_hoy"], datos["dias_jugados"]) == (2, 2, True, 2)
+    logros = {l["clave"]: l for l in datos["logros"]}
+    assert logros["primera_serie"]["obtenido"] and logros["sin_fallos"]["obtenido"]
+    assert logros["rango_5"]["obtenido"] and not logros["rango_15"]["obtenido"]
+    assert logros["rango_15"]["avance"] == 7.0
+    assert (logros["racha_3"]["avance"], logros["racha_3"]["obtenido"]) == (2, False)
+    assert (logros["todos"]["avance"], logros["tiempo_30"]["avance"]) == (1, 2.7)
+
+
+def test_logros_de_jugador_sin_datos(cliente):
+    crear_jugador(cliente)
+    datos = cliente.get("/api/pacientes/AMC-001/logros").json()
+    assert (datos["racha"], datos["mejor_racha"]) == (0, 0)
+    assert not any(l["obtenido"] for l in datos["logros"])
+
+
+# --- encuesta SUS e indicadores técnicos ------------------------------------------------
+
+def test_puntaje_sus():
+    from api.rutas import puntaje_sus
+    assert puntaje_sus([5, 1] * 5) == 100.0  # de acuerdo con lo bueno, en desacuerdo con lo malo
+    assert puntaje_sus([1, 5] * 5) == 0.0
+    assert puntaje_sus([3] * 10) == 50.0
+    assert puntaje_sus([4, 2, 4, 1, 5, 2, 4, 1, 4, 2]) == 82.5
+    with pytest.raises(ValueError):
+        puntaje_sus([6] * 10)
+
+
+def test_encuesta_sus_se_guarda(cliente):
+    crear_jugador(cliente)
+    assert cliente.get("/api/pacientes/AMC-001/sus").json()["respondida"] is False
+    r = cliente.post("/api/pacientes/AMC-001/sus", json={"respuestas": [4, 2, 4, 1, 5, 2, 4, 1, 4, 2]})
+    assert r.status_code == 201 and r.json() == {"id": 1, "puntaje": 82.5, "cumple_meta": True}
+    assert cliente.get("/api/pacientes/AMC-001/sus").json()["puntaje"] == 82.5
+    assert cliente.post("/api/pacientes/AMC-001/sus", json={"respuestas": [3] * 9}).status_code == 422
+    assert cliente.post("/api/pacientes/AMC-001/sus", json={"respuestas": [0] * 10}).status_code == 422
+
+
+def test_indicadores_tecnicos(cliente):
+    crear_jugador(cliente)
+    sesion = nueva_sesion(cliente)
+    for gonio, sistema in ((30, 34), (60, 57)):
+        medir(cliente, sesion, gonio, sistema)
+    guardar(cliente, sesion, resultado(fps_promedio=24.0))
+    guardar(cliente, sesion, resultado(fps_promedio=12.0))
+    r = cliente.patch(f"/api/sesiones/{sesion}", json={"latencia_promedio_ms": 90, "latencia_p95_ms": 150, "terminar": False})
+    assert r.status_code == 200
+    cliente.post("/api/pacientes/AMC-001/sus", json={"respuestas": [3] * 10})
+    cliente.post("/api/pacientes/AMC-001/sus", json={"respuestas": [5, 1] * 5})  # cuenta solo la última
+    d = cliente.get("/api/indicadores").json()
+    assert d["precision"]["total"]["n"] == 2 and d["precision"]["total"]["error_absoluto_medio"] == 3.5
+    assert d["precision"]["jugadores"] == 1
+    assert (d["fps"]["n"], d["fps"]["promedio"], d["fps"]["porcentaje_cumple"]) == (2, 18.0, 50)
+    assert (d["latencia"]["promedio"], d["latencia"]["p95_promedio"], d["latencia"]["porcentaje_cumple"]) == (90.0, 150.0, 100)
+    assert (d["sus"]["n"], d["sus"]["promedio"], d["sus"]["porcentaje_cumple"]) == (1, 100.0, 100)
+
+
+def test_indicadores_sin_datos(cliente):
+    d = cliente.get("/api/indicadores").json()
+    assert d["precision"]["total"] is None and d["fps"]["promedio"] is None and d["sus"]["n"] == 0

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 140" role="img" aria-label="VERA">
+  <!-- El logo de logo.svg en un solo color y sin brillo: es la máscara del tema profesional. -->
+  <g transform="translate(8 10)" fill="none" stroke="#000" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M 26 86 A 40 40 0 1 1 94 86" stroke-width="10"/>
+    <polyline points="50,34 60,64 86,72" stroke-width="7"/>
+  </g>
+  <text x="140" y="98" font-family="'Segoe UI', system-ui, sans-serif" font-weight="600"
+        font-size="88" letter-spacing="8" fill="#000">VERA</text>
+</svg>

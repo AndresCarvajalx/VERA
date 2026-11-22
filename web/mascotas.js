@@ -7,7 +7,7 @@ import { Toribara, cargarModelo } from "./toribara.js";
 
 const FRASES = ["¡Hola!", "¿Listo para moverte?", "¡Vamos a entrenar!", "¡Tú puedes!", "¡Hoy toca estirar!",
   "¡Te estaba esperando!", "¡Elígeme a mí!"];
-const RESPUESTAS = ["¡Hey! 👋", "¡Jaja, cosquillas!", "¡Juguemos!", "¡Aquí estoy!"];
+const RESPUESTAS = ["¡Hey!", "¡Jaja, cosquillas!", "¡Juguemos!", "¡Aquí estoy!"];
 const DURACION = { entra: 700, saluda: 2600, sale: 650 };
 
 // Lugares desde donde se asoman. borde: hacia dónde se esconden; inclina: se ladean al asomarse

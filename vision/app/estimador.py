@@ -33,6 +33,32 @@ class EstimadorPose(Protocol):
     def cerrar(self) -> None: ...
 
 
+# El modelo trabaja sobre un recorte reducido de la persona: una imagen más grande que esto (la
+# cámara de un celular llega a 1920×1080) solo gasta tiempo en convertirla y copiarla.
+LADO_MAXIMO = 960
+# Con poca luz la detección pierde confianza: por debajo de este brillo medio (0–255) se aclara la
+# imagen con una curva gamma antes de pasarla al modelo. No cambia la geometría, solo el contraste.
+BRILLO_BAJO, BRILLO_OBJETIVO, GAMMA_MINIMA = 70.0, 110.0, 0.45
+
+
+def preparar_imagen(fotograma_bgr: np.ndarray, _tablas: dict = {}) -> np.ndarray:
+    """Fotograma BGR de la cámara → RGB listo para el modelo (reducido y aclarado si hace falta)."""
+    import cv2
+
+    alto, ancho = fotograma_bgr.shape[:2]
+    if max(alto, ancho) > LADO_MAXIMO:
+        escala = LADO_MAXIMO / max(alto, ancho)
+        fotograma_bgr = cv2.resize(fotograma_bgr, (round(ancho * escala), round(alto * escala)),
+                                   interpolation=cv2.INTER_AREA)
+    brillo = float(fotograma_bgr[::8, ::8].mean())  # una muestra de 1 de cada 64 píxeles basta
+    if 1.0 <= brillo < BRILLO_BAJO:
+        gamma = max(GAMMA_MINIMA, round(np.log(BRILLO_OBJETIVO / 255) / np.log(brillo / 255), 2))
+        if gamma not in _tablas:
+            _tablas[gamma] = (np.linspace(0, 1, 256) ** gamma * 255).astype(np.uint8)
+        fotograma_bgr = cv2.LUT(fotograma_bgr, _tablas[gamma])
+    return cv2.cvtColor(fotograma_bgr, cv2.COLOR_BGR2RGB)
+
+
 class EstimadorMediaPipe:
     def __init__(self, ruta_modelo: Path) -> None:
         import mediapipe as mp
@@ -54,12 +80,10 @@ class EstimadorMediaPipe:
         self._ultimo_t = -1
 
     def detectar(self, fotograma_bgr: np.ndarray, t_ms: int) -> Pose | None:
-        import cv2
-
         # El modo VIDEO exige marcas de tiempo estrictamente crecientes.
         t_ms = max(t_ms, self._ultimo_t + 1)
         self._ultimo_t = t_ms
-        rgb = cv2.cvtColor(fotograma_bgr, cv2.COLOR_BGR2RGB)
+        rgb = preparar_imagen(fotograma_bgr)
         imagen = self._mp.Image(image_format=self._mp.ImageFormat.SRGB, data=rgb)
         resultado = self._detector.detect_for_video(imagen, t_ms)
         if not resultado.pose_landmarks:

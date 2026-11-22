@@ -5,34 +5,88 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>VERA · Rehabilitación en movimiento</title>
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <meta name="color-scheme" content="dark">
+  <!-- Aplica el tema guardado antes de pintar, para que no se vea primero el otro (web/tema.js). -->
+  <script>
+    try {
+      if (localStorage.getItem("tema") === "profesional") {
+        document.documentElement.dataset.tema = "profesional";
+        document.querySelector('meta[name="color-scheme"]').content = "light dark";
+      }
+    } catch { /* sin almacenamiento: queda el tema por defecto */ }
+  </script>
   <link rel="stylesheet" href="prueba.css">
+  <link rel="stylesheet" href="tema_profesional.css">
 </head>
 <body>
+  <canvas id="estrellas" class="estrellas" aria-hidden="true"></canvas>
+  <!-- Tutorial de la primera vez (web/tutorial.js). -->
+  <dialog id="dialogo_tutorial" class="dialogo dialogo-tutorial" aria-labelledby="tutorial_titulo">
+    <div id="tutorial_icono" class="tutorial-icono"></div>
+    <h2 id="tutorial_titulo"></h2>
+    <p id="tutorial_texto"></p>
+    <div id="tutorial_puntos" class="tutorial-puntos" aria-hidden="true"></div>
+    <div class="botones centrados">
+      <button type="button" id="tutorial_saltar">Saltar</button>
+      <button type="button" id="tutorial_anterior">Anterior</button>
+      <button type="button" id="tutorial_siguiente" class="primario">Siguiente</button>
+    </div>
+  </dialog>
+
+  <!-- Encuesta de usabilidad SUS (web/encuesta.js). -->
+  <dialog id="dialogo_sus" class="dialogo dialogo-sus" aria-labelledby="titulo_sus">
+    <form id="formulario_sus" method="dialog">
+      <h2 id="titulo_sus">¿Qué tal te pareció VERA?</h2>
+      <p class="nota">Diez afirmaciones sobre qué tan fácil es usar el juego. Marca de 1 (totalmente en desacuerdo) a
+        5 (totalmente de acuerdo). No hay respuestas buenas ni malas, y no pregunta nada de tu salud.</p>
+      <div id="lista_sus"></div>
+      <p id="mensaje_sus" class="nota alerta" aria-live="polite"></p>
+      <div class="botones centrados">
+        <button type="button" id="cancelar_sus">Ahora no</button>
+        <button type="submit" class="primario">Enviar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Informe para guardar como PDF (web/informe.js): solo se ve al imprimir. -->
+  <div id="informe" class="informe" aria-hidden="true"></div>
+  <div id="carga" class="carga" role="status">
+    <img src="logo.svg" class="logo-carga" alt="VERA">
+    <div class="barra-carga" aria-hidden="true"><div></div></div>
+    <p>Preparando el escenario…</p>
+  </div>
+  <button type="button" id="btn_sonido" class="boton-sonido" aria-pressed="false"><span class="icono" data-icono="sonido" aria-hidden="true"></span></button>
+
   <!-- ============ MENÚ DE INICIO ============ -->
   <section id="pantalla_menu" class="pantalla pantalla-menu activa" aria-label="Menú de inicio">
     <canvas id="mascotas" class="mascotas" aria-hidden="true"></canvas>
     <div id="globo" class="globo oculto" aria-live="polite"></div>
     <div class="menu-centro">
-      <img src="logo.svg" class="logo-grande" alt="VERA">
+      <div class="logo-marco"><img src="logo.svg" class="logo-grande" alt="VERA"></div>
       <p class="lema">Rehabilitación en movimiento</p>
       <nav class="menu-botones">
-        <button type="button" class="boton-menu primario" data-ir="personaje">Iniciar</button>
-        <button type="button" class="boton-menu" data-ir="progreso">Mi progreso</button>
-        <button type="button" class="boton-menu" data-ir="manual">Manual de usuario</button>
-        <button type="button" class="boton-menu" data-ir="ajustes">Ajustes</button>
+        <button type="button" class="boton-menu primario" data-ir="personaje"><span class="icono" data-icono="reproducir" aria-hidden="true"></span>Iniciar</button>
+        <button type="button" class="boton-menu" data-ir="progreso"><span class="icono" data-icono="grafica" aria-hidden="true"></span>Mi progreso</button>
+        <button type="button" class="boton-menu" data-ir="manual"><span class="icono" data-icono="libro" aria-hidden="true"></span>Manual de usuario</button>
+        <button type="button" class="boton-menu" data-ir="ajustes"><span class="icono" data-icono="ajustes" aria-hidden="true"></span>Ajustes</button>
       </nav>
       <p class="estado-menu"><span id="conexion" class="chip">Conectando…</span></p>
+      <p class="pie-menu">Videojuego de rehabilitación · Unitrópico 2026</p>
     </div>
   </section>
 
   <!-- ============ SELECCIÓN DE PERSONAJE ============ -->
   <section id="pantalla_personaje" class="pantalla" aria-label="Elige tu personaje">
     <header class="barra-superior">
-      <button type="button" class="volver" data-ir="menu">← Menú</button>
+      <button type="button" class="volver" data-ir="menu"><span class="icono" data-icono="flecha-izq" aria-hidden="true"></span>Menú</button>
       <img src="logo.svg" class="logo-chico" alt="VERA">
       <h1>Elige tu personaje</h1>
     </header>
     <div id="selector_personaje" class="fila-personajes" role="radiogroup" aria-label="Personaje"></div>
+    <section class="escenarios" aria-labelledby="titulo_escenarios">
+      <h2 id="titulo_escenarios">Escenario</h2>
+      <div id="selector_escenario" class="fila-escenarios" role="radiogroup" aria-label="Escenario"></div>
+    </section>
     <div class="quien-juega">
       <div class="formulario">
         <label>¿Quién juega?
@@ -54,7 +108,7 @@
   <!-- ============ MANUAL DE USUARIO ============ -->
   <section id="pantalla_manual" class="pantalla" aria-label="Manual de usuario">
     <header class="barra-superior">
-      <button type="button" class="volver" data-ir="menu">← Menú</button>
+      <button type="button" class="volver" data-ir="menu"><span class="icono" data-icono="flecha-izq" aria-hidden="true"></span>Menú</button>
       <img src="logo.svg" class="logo-chico" alt="VERA">
       <h1>Manual de usuario</h1>
     </header>
@@ -70,6 +124,7 @@
       <div class="contenido-manual">
         <article id="manual_pasos" class="tarjeta-manual">
           <h2>Cómo se juega</h2>
+          <div class="botones"><button type="button" id="btn_ver_tutorial">Ver el tutorial</button></div>
           <ol class="pasos">
             <li><strong>Elige tu personaje y tu código de jugador.</strong> Así se guarda tu progreso.</li>
             <li><strong>Elige el ejercicio y la pierna</strong> que vas a trabajar.</li>
@@ -82,11 +137,11 @@
         <article id="manual_preparar" class="tarjeta-manual">
           <h2>Antes de empezar</h2>
           <ul class="consejos">
-            <li>📷 <strong>Cámara de lado</strong> y fija, a la altura de la cadera. De frente no se pueden medir estos movimientos.</li>
-            <li>💡 <strong>Luz de frente</strong>, no a la espalda: con poca luz la cámara pierde fluidez.</li>
-            <li>📐 <strong>Espacio libre</strong> de unos 2 × 2 m y ropa que deje ver las piernas.</li>
-            <li>🪑 Para «Estirar la rodilla sentado» necesitas una silla estable.</li>
-            <li>🛑 <strong>Si sientes dolor o malestar, detente.</strong> El botón «Detener» siempre está visible. VERA no reemplaza a tu fisioterapeuta.</li>
+            <li><span class="icono" data-icono="camara" aria-hidden="true"></span><span><strong>Cámara de lado</strong> y fija, a la altura de la cadera. De frente no se pueden medir estos movimientos.</span></li>
+            <li><span class="icono" data-icono="luz" aria-hidden="true"></span><span><strong>Luz de frente</strong>, no a la espalda: con poca luz la cámara pierde fluidez.</span></li>
+            <li><span class="icono" data-icono="espacio" aria-hidden="true"></span><span><strong>Espacio libre</strong> de unos 2 × 2 m y ropa que deje ver las piernas.</span></li>
+            <li><span class="icono" data-icono="silla" aria-hidden="true"></span><span>Para «Estirar la rodilla sentado» necesitas una silla estable, <strong>de perfil a la cámara</strong>. Mira al frente, no a la pantalla: si giras el cuerpo, el juego deja de medir hasta que vuelvas a quedar de perfil.</span></li>
+            <li><span class="icono" data-icono="alto" aria-hidden="true"></span><span><strong>Si sientes dolor o malestar, detente.</strong> El botón «Detener» siempre está visible. VERA no reemplaza a tu fisioterapeuta.</span></li>
           </ul>
         </article>
         <article id="manual_ejercicios" class="tarjeta-manual">
@@ -130,11 +185,49 @@
   <!-- ============ AJUSTES ============ -->
   <section id="pantalla_ajustes" class="pantalla" aria-label="Ajustes">
     <header class="barra-superior">
-      <button type="button" class="volver" data-ir="menu">← Menú</button>
+      <button type="button" class="volver" data-ir="menu"><span class="icono" data-icono="flecha-izq" aria-hidden="true"></span>Menú</button>
       <img src="logo.svg" class="logo-chico" alt="VERA">
       <h1>Ajustes</h1>
     </header>
     <div class="ajustes">
+      <article class="tarjeta-manual tarjeta-tema">
+        <h2>Apariencia</h2>
+        <p class="nota">Elige cómo se ve VERA. Puedes cambiarlo cuando quieras; se guarda en este navegador.</p>
+        <fieldset class="selector-tema">
+          <legend class="solo-lectores">Tema de la interfaz</legend>
+          <label class="opcion-tema">
+            <input type="radio" name="tema" value="neon" checked>
+            <span class="muestra-tema muestra-neon" aria-hidden="true"></span>
+            <span><strong>Tema actual</strong><small>Colorido y animado, pensado para jugar.</small></span>
+          </label>
+          <label class="opcion-tema">
+            <input type="radio" name="tema" value="profesional">
+            <span class="muestra-tema muestra-profesional" aria-hidden="true"></span>
+            <span><strong>Tema profesional</strong><small>Sobrio y sin animaciones decorativas. Sigue el modo claro u oscuro del sistema.</small></span>
+          </label>
+        </fieldset>
+      </article>
+      <article class="tarjeta-manual tarjeta-sonido">
+        <h2>Sonido</h2>
+        <p class="nota">La música y los sonidos se crean en este equipo. El botón de la esquina los silencia en cualquier pantalla.</p>
+        <div class="volumenes">
+          <label for="vol_musica">Música</label><input id="vol_musica" type="range" min="0" max="100" step="5">
+          <label for="vol_efectos">Efectos</label><input id="vol_efectos" type="range" min="0" max="100" step="5">
+        </div>
+        <label class="opcion-voz"><input type="checkbox" id="voz_activa"> Voz que guía la sesión
+          <small>Lee en voz alta las instrucciones, para cuando estás lejos de la pantalla.</small></label>
+        <div class="formulario elegir-voz">
+          <label class="ancho">Voz<select id="voz_nombre"></select></label>
+        </div>
+        <p id="voz_nota" class="nota"></p>
+        <div class="botones" id="probar_sonidos" role="group" aria-label="Probar los sonidos de una repetición">
+          <button type="button" data-efecto="perfecto">Perfecto</button>
+          <button type="button" data-efecto="bien">Bien</button>
+          <button type="button" data-efecto="casi">Casi</button>
+          <button type="button" data-efecto="mal">No contó</button>
+          <button type="button" id="probar_voz">Probar la voz</button>
+        </div>
+      </article>
       <article class="tarjeta-manual">
         <h2>Cámara</h2>
         <p class="nota">Cámara en uso: <strong id="camara_actual">–</strong></p>
@@ -169,7 +262,7 @@
   <!-- ============ MI PROGRESO ============ -->
   <section id="pantalla_progreso" class="pantalla" aria-label="Mi progreso">
     <header class="barra-superior">
-      <button type="button" class="volver" data-ir="menu">← Menú</button>
+      <button type="button" class="volver" data-ir="menu"><span class="icono" data-icono="flecha-izq" aria-hidden="true"></span>Menú</button>
       <img src="logo.svg" class="logo-chico" alt="VERA">
       <h1>Mi progreso</h1>
     </header>
@@ -181,11 +274,27 @@
           <button type="button" role="radio" data-dias="30">30 días</button>
           <button type="button" role="radio" data-dias="todo">Todo</button>
         </div>
+        <button type="button" id="btn_informe_progreso" class="primario" title="Resumen del periodo para guardar como PDF o imprimir">Informe (PDF)</button>
         <button type="button" id="btn_descargar_progreso" title="Todos los datos del jugador, un renglón por día">Descargar datos (CSV)</button>
       </div>
       <p id="progreso_mensaje" class="nota oculto"></p>
       <div id="contenido_progreso" class="oculto">
         <div id="cifras_progreso" class="cifras-progreso"></div>
+        <div class="racha-y-logros">
+          <article id="tarjeta_racha" class="tarjeta tarjeta-racha">
+            <span class="llama-grande"><span class="icono" data-icono="llama" aria-hidden="true"></span></span>
+            <div>
+              <h3>Racha</h3>
+              <p class="cifra"><span id="racha_numero">0</span> <small id="racha_unidad">días seguidos</small></p>
+              <p class="nota" id="racha_texto"></p>
+              <p class="nota" id="racha_mejor"></p>
+            </div>
+          </article>
+          <article class="tarjeta">
+            <h3>Logros <small id="logros_cuenta" class="cuenta-logros"></small></h3>
+            <ul id="lista_logros" class="lista-logros"></ul>
+          </article>
+        </div>
         <article class="tarjeta">
           <h3>Tiempo jugado por día</h3>
           <p class="nota">Solo cuenta el tiempo en movimiento: sin pausas ni la espera mientras te ubicas.</p>
@@ -211,7 +320,7 @@
        calibración de su rango → cuenta regresiva → repeticiones → resultado. -->
   <section id="pantalla_sesion" class="pantalla pantalla-sesion" aria-label="Sesión de ejercicio">
     <header class="barra-superior">
-      <button type="button" class="volver" data-ir="menu">← Menú</button>
+      <button type="button" class="volver" data-ir="menu"><span class="icono" data-icono="flecha-izq" aria-hidden="true"></span>Menú</button>
       <img src="logo.svg" class="logo-chico" alt="VERA">
       <ol id="pasos_sesion" class="pasos-sesion" aria-label="Pasos de la sesión">
         <li data-paso="encuadre">Calibrar</li>
@@ -220,6 +329,7 @@
         <li data-paso="juego">¡A jugar!</li>
       </ol>
       <span id="sesion_jugador" class="chip ok"></span>
+      <span id="sesion_racha" class="chip racha oculto"></span>
       <button type="button" class="volver" data-ir="juego" title="Ángulos, medición con goniómetro y progreso">Panel del fisioterapeuta</button>
     </header>
     <div class="escenario-sesion escena">
@@ -231,6 +341,7 @@
         <p id="paso_etiqueta" class="paso-etiqueta"></p>
         <h2 id="paso_titulo" class="paso-titulo"></h2>
         <p id="paso_texto" class="paso-texto"></p>
+        <div id="paso_estrellas" class="estrellas-resultado oculto" role="img"></div>
         <div id="paso_cuenta" class="cuenta oculto"></div>
         <div id="paso_barra" class="progreso grande oculto"><div id="paso_progreso"></div></div>
         <div id="paso_lado" class="selector-lado oculto" role="radiogroup" aria-label="Pierna">
@@ -246,6 +357,7 @@
         <div class="hud-bloque">
           <span class="hud-etiqueta">Repeticiones</span>
           <div class="reps-grande"><span id="sesion_reps">0</span><small>/<span id="sesion_reps_meta">0</span></small></div>
+          <div id="sesion_pips" class="pips" aria-hidden="true"></div>
         </div>
         <div class="hud-bloque ancho-hud">
           <div class="ejecucion-cabecera">
@@ -261,6 +373,7 @@
         </div>
       </div>
 
+      <div id="aviso_logro" class="aviso-logro" role="status" aria-live="polite"></div>
       <div id="destello_sesion" class="destello"></div>
       <div id="celebracion_sesion" class="celebracion" aria-live="polite"></div>
       <div class="controles-sesion">
@@ -273,9 +386,9 @@
   <!-- ============ PANEL DEL FISIOTERAPEUTA ============ -->
   <section id="pantalla_juego" class="pantalla" aria-label="Juego">
     <header class="barra-superior">
-      <button type="button" class="volver" data-ir="menu">← Menú</button>
+      <button type="button" class="volver" data-ir="menu"><span class="icono" data-icono="flecha-izq" aria-hidden="true"></span>Menú</button>
       <img src="logo.svg" class="logo-chico" alt="VERA">
-      <button type="button" class="volver" data-ir="sesion">← Sesión guiada</button>
+      <button type="button" class="volver" data-ir="sesion"><span class="icono" data-icono="flecha-izq" aria-hidden="true"></span>Sesión guiada</button>
       <h1>Panel del fisioterapeuta</h1>
       <span id="jugador_actual" class="chip">Sin jugador</span>
     </header>
@@ -370,6 +483,12 @@
             <p class="nota ancho" id="ref_resumen"></p>
           </div>
         </details>
+
+        <div class="panel-referencia">
+          <p class="nota">Indicadores del OE4 con los datos de todos los jugadores: precisión frente al goniómetro, FPS,
+            latencia y usabilidad (SUS).</p>
+          <div class="botones"><button type="button" id="btn_informe_tecnico">Informe técnico (PDF)</button></div>
+        </div>
 
         <h2>Eventos</h2>
         <ol id="eventos"></ol>

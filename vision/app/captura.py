@@ -16,9 +16,11 @@ import cv2
 from . import trazas
 from .controlador import Controlador
 from .estimador import EstimadorPose, Landmark, Pose
-from .filtros import Antirrebote, FiltroOneEuro
-from .miembro_inferior import (INDICES, calcular_angulos, hacia_donde_mira, lado_mas_visible, puntos_faltantes,
-                               vista)
+from .filtros import Antirrebote
+from .miembro_inferior import (INDICES, calcular_angulos, hacia_donde_mira, lado_mas_visible, muslo_hacia_adelante,
+                               puntos_faltantes, vista)
+from .reglas import cargar
+from .seguimiento import SeguidorPose
 
 log = logging.getLogger(__name__)
 
@@ -139,7 +141,8 @@ class BucleCaptura:
         self._ancho_pedido, self._alto_pedido = ancho, alto
         self._hilo: threading.Thread | None = None
         self._detener = threading.Event()
-        self._filtros: list[tuple[FiltroOneEuro, ...]] = []
+        self._seguidor = SeguidorPose(cargar().visibilidad_minima)
+        self._proceso_ms = 0.0  # tiempo medio de detectar y medir un fotograma
         self._encuadre_anterior: bool | None = None
         self._confianza_anterior: bool | None = None
         self._encuadre_estable = Antirrebote()
@@ -199,21 +202,13 @@ class BucleCaptura:
         if self._hilo:
             self._hilo.join(timeout=3)
 
-    def _suavizar(self, pose: Pose, t: float) -> Pose:
-        """Un filtro One Euro por coordenada: 3 de la imagen y 3 del mundo para cada punto."""
-        if not self._filtros:
-            self._filtros = [tuple(FiltroOneEuro() for _ in range(6)) for _ in pose.landmarks]
-        landmarks, mundo = [], []
-        for p, w, (fx, fy, fz, wx, wy, wz) in zip(pose.landmarks, pose.mundo, self._filtros):
-            landmarks.append(Landmark(fx.aplicar(p.x, t), fy.aplicar(p.y, t), fz.aplicar(p.z, t), p.visibilidad))
-            mundo.append((wx.aplicar(w[0], t), wy.aplicar(w[1], t), wz.aplicar(w[2], t)))
-        return Pose(landmarks, mundo)
-
-    def _mira(self, lms: list[Landmark], ancho: int, t_ms: int) -> int | None:
+    def _mira(self, lms: list[Landmark], ancho: int, alto: int, t_ms: int) -> int | None:
         actividad = self._controlador.actividad
         fija = actividad is not None and actividad.vista_ok and self._mira_estable.valor is not None
-        lectura = hacia_donde_mira(lms, ancho)
-        if not fija and lectura is not None:
+        # Durante una actividad solo el muslo horizontal puede corregirla: una cabeza girada no, pero
+        # sentado sí hay que corregir un valor viejo, o 90° de flexión se leerían como −90°.
+        lectura = muslo_hacia_adelante(lms, ancho, alto) if fija else hacia_donde_mira(lms, ancho, alto)
+        if lectura is not None:
             self._mira_estable.actualizar(lectura, t_ms)
         return self._mira_estable.valor
 
@@ -247,9 +242,12 @@ class BucleCaptura:
                     continue
                 secuencia, fotograma, t_captura = dato
                 alto, ancho = fotograma.shape[:2]
+                inicio = time.perf_counter()
                 pose = self._estimador.detectar(fotograma, t_captura)
                 del fotograma  # el video nunca sale de aquí
                 self._procesar(pose, t_captura, ancho, alto, fps.marcar(time.perf_counter()))
+                tardo = (time.perf_counter() - inicio) * 1000
+                self._proceso_ms += (tardo - self._proceso_ms) * 0.1 if self._proceso_ms else tardo
         finally:
             if lector:
                 lector.cerrar()
@@ -259,17 +257,17 @@ class BucleCaptura:
         lms, vista_actual = None, None
         # Con la cámara de lado solo se exige el lado medido (o, sin ejercicio, el más visible).
         lado = self._controlador.lado_activo
+        # Suaviza, sostiene huecos cortos y descarta detecciones que no son el jugador.
+        pose = self._seguidor.actualizar(pose, t_captura)
         if pose is None:
-            self._filtros = []  # al reaparecer la persona no se arrastra la posición vieja
             encuadre, angulos, salida, mundo = False, {}, [], []
             faltan = [n for n in INDICES if lado is None or n.endswith(lado)]
         else:
-            pose = self._suavizar(pose, t_captura / 1000)
             lms = pose.landmarks
             lado = lado or lado_mas_visible(lms)
             faltan = puntos_faltantes(lms, lado)
             encuadre = not faltan
-            angulos = calcular_angulos(lms, ancho, alto, mira=self._mira(lms, ancho, t_captura))
+            angulos = calcular_angulos(lms, ancho, alto, mira=self._mira(lms, ancho, alto, t_captura))
             vista_actual = vista(lms, ancho, alto)
             salida = [[round(p.x, 4), round(p.y, 4), round(p.z, 4), round(p.visibilidad, 3)] for p in lms]
             mundo = [[round(c, 3) for c in w] for w in pose.mundo]
@@ -303,6 +301,7 @@ class BucleCaptura:
             "tipo": "fotograma",
             "t_captura": t_captura,
             "fps": round(fps, 1),
+            "proceso_ms": round(self._proceso_ms, 1),
             "imagen": [ancho, alto],
             "encuadre_ok": encuadre,
             "persona": lms is not None,

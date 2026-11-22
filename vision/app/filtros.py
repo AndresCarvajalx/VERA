@@ -46,7 +46,15 @@ def _alfa(corte_hz: float, dt: float) -> float:
 
 
 class FiltroOneEuro:
-    def __init__(self, corte_min: float = 1.0, beta: float = 0.05, corte_derivada: float = 1.0) -> None:
+    """corte_min: suavizado en reposo (Hz). beta: cuánto se abre el filtro por cada unidad/s de rapidez.
+
+    Las coordenadas van de 0 a 1 y un movimiento rápido de la pierna ronda 0.5 por segundo. Con el
+    beta anterior (0.05) el filtro casi no se abría: seguía a ~1 Hz y el punto llegaba ~150 ms tarde,
+    recortando el pico de los movimientos rápidos. Con 12 sigue a ~7 Hz (retraso ~25 ms) y en reposo
+    sigue quitando el temblor igual que antes.
+    """
+
+    def __init__(self, corte_min: float = 1.2, beta: float = 12.0, corte_derivada: float = 1.0) -> None:
         self.corte_min = corte_min
         self.beta = beta
         self.corte_derivada = corte_derivada
@@ -54,8 +62,9 @@ class FiltroOneEuro:
         self._dx = FiltroPasoBajo()
         self._t_anterior: float | None = None
 
-    def aplicar(self, x: float, t: float) -> float:
-        """x: valor nuevo; t: tiempo en segundos."""
+    def aplicar(self, x: float, t: float, movilidad: float = 1.0) -> float:
+        """x: valor nuevo; t: tiempo en segundos; movilidad (0–1): menor para una lectura poco
+        confiable, que entonces se sigue más despacio."""
         if self._t_anterior is None or t <= self._t_anterior:
             self._t_anterior = t
             self._dx.aplicar(0.0, 1.0)
@@ -65,7 +74,7 @@ class FiltroOneEuro:
         anterior = self._x.valor
         dx = (x - anterior) / dt
         dx_suave = self._dx.aplicar(dx, _alfa(self.corte_derivada, dt))
-        corte = self.corte_min + self.beta * abs(dx_suave)
+        corte = (self.corte_min + self.beta * abs(dx_suave)) * movilidad
         return self._x.aplicar(x, _alfa(corte, dt))
 
     def reiniciar(self) -> None:

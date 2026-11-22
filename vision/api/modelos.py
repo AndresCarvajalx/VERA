@@ -79,6 +79,8 @@ class Sesion(Base):
     inicio: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=ahora)
     fin: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     latencia_promedio_ms: Mapped[float | None] = mapped_column(Float)
+    latencia_p95_ms: Mapped[float | None] = mapped_column(Float)  # el 95 % de los fotogramas llegó en menos que esto
+    fps_promedio: Mapped[float | None] = mapped_column(Float)
     paciente: Mapped[Paciente] = relationship(back_populates="sesiones")
     resultados: Mapped[list["ResultadoEjercicio"]] = relationship(back_populates="sesion")
 
@@ -139,3 +141,14 @@ class Repeticion(Base):
     valida: Mapped[bool] = mapped_column(Boolean)
     motivo: Mapped[str | None] = mapped_column(String(20))
     resultado: Mapped[ResultadoEjercicio] = relationship(back_populates="repeticiones")
+
+
+class EncuestaSUS(Base):
+    """System Usability Scale (Brooke, 1996): 10 afirmaciones de 1 a 5 y un puntaje de 0 a 100.
+    Mide la usabilidad del juego (indicador del OE4: SUS ≥ 68); no mide nada clínico."""
+    __tablename__ = "encuesta_sus"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    paciente_id: Mapped[int] = mapped_column(ForeignKey("paciente.id"))
+    respuestas: Mapped[str] = mapped_column(String(40))  # "4,2,5,1,..." en el orden del cuestionario
+    puntaje: Mapped[float] = mapped_column(Float)
+    fecha: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=ahora)

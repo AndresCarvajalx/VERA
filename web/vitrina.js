@@ -1,6 +1,7 @@
 // Un personaje solo sobre un pedestal de neón, para las vistas previas de la selección y la
 // demostración del manual. Quien la usa decide la pose de cada cuadro (función `pose`).
 import * as THREE from "./vendor/three.module.min.js";
+import { entornoLuminoso } from "./efectos3d.js";
 import { poseQuieta } from "./guia.js";
 import { Toribara, cargarModelo } from "./toribara.js";
 
@@ -40,6 +41,7 @@ export class Vitrina {
     this.aro.rotation.x = -Math.PI / 2;
     this.aro.position.y = 0.003;
     this.escena.add(this.aro);
+    this.escena.environment = entornoLuminoso(this.renderer, [token("--cian"), token("--rosa")]);
 
     this.silla = new THREE.Mesh(new THREE.BoxGeometry(0.45, 1, 0.42),
       new THREE.MeshStandardMaterial({ color: token("--silla"), roughness: 0.7 }));

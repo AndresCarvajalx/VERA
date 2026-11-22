@@ -86,6 +86,22 @@ class ContadorRepeticiones:
                     self._cumplida = True
         return None
 
+    def calidad(self, rep: Repeticion, meta: float, fraccion_casi: float) -> str:
+        """Cómo le fue: "perfecto" (pasó la meta), "bien" (válida, dentro de la tolerancia), "casi" o "mal".
+
+        `meta` es el ángulo clínico. "Casi" es no sostener el tiempo o quedarse cerca de la meta;
+        una repetición con compensación es "mal" aunque llegue, porque el movimiento no fue el pedido.
+        """
+        v = self.signo * rep.angulo_pico
+        if rep.valida:
+            return "perfecto" if v >= self.signo * meta else "bien"
+        if rep.motivo == "compensacion":
+            return "mal"
+        if rep.motivo == "no_sostuvo":
+            return "casi"
+        recorrido = self.umbral_meta - self.umbral_inicio
+        return "casi" if recorrido > 0 and (v - self.umbral_inicio) / recorrido >= fraccion_casi else "mal"
+
     def _cerrar(self) -> str:
         if self._compensada:
             motivo = "compensacion"

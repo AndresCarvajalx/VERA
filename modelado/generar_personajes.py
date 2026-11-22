@@ -1,14 +1,16 @@
 """Genera en Blender los personajes elegibles del juego: malla, materiales, esqueleto y exportación.
 
+- persona:    deportista de 1.70 m.
+- mujer:      deportista de 1.65 m con cola de caballo.
 - toribara:   toro + capibara (cuernos, mechón, pezuñas).
 - conejibara: conejo + capibara (orejas largas, dientes de conejo, cola de pompón, patas largas).
 
-Todos comparten cuerpo de capibara, esqueleto, vendas y banda del guía; solo cambian la cabeza,
-la cola, las manos, los pies y los colores. Por eso el juego los mueve con el mismo código.
+Todos comparten esqueleto, vendas y banda del guía. Por eso el juego los mueve con el mismo código.
+Los capibaras comparten cuerpo y cambian la cabeza, la cola, las manos, los pies y los colores.
 
 Uso (sin abrir la ventana de Blender), desde la raíz del proyecto:
     "D:\\steam\\steamapps\\common\\Blender\\blender.exe" --background --factory-startup \
-        --python modelado/generar_personajes.py -- [carpeta_de_vistas_previas]
+        --python modelado/generar_personajes.py -- [carpeta_de_vistas_previas] [especie ...]
 
 Produce, por cada especie:
     modelado/<especie>.blend   para retocarlo a mano en Blender
@@ -45,6 +47,10 @@ PROPORCIONES = {
     "humano": {"cadera_z": 0.92, "rodilla_z": 0.49, "tobillo_z": 0.08, "punta": (-0.15, 0.025),
                "hombro_z": 1.42, "codo_z": 1.14, "muneca_z": 0.89, "cuello_z": 1.47,
                "x_cadera": 0.09, "x_hombro": 0.19, "abre_codo": 0.05, "abre_muneca": 0.08, "cabeza_alto": 0.27},
+    # Mujer adulta de 1.65 m, misma pose: hombros más angostos y cadera proporcionalmente más ancha.
+    "mujer": {"cadera_z": 0.9, "rodilla_z": 0.48, "tobillo_z": 0.08, "punta": (-0.14, 0.025),
+              "hombro_z": 1.37, "codo_z": 1.1, "muneca_z": 0.87, "cuello_z": 1.42,
+              "x_cadera": 0.088, "x_hombro": 0.165, "abre_codo": 0.05, "abre_muneca": 0.08, "cabeza_alto": 0.26},
 }
 P = dict(PROPORCIONES["capibara"])  # proporciones de la especie que se está construyendo (main)
 
@@ -293,6 +299,7 @@ def cuerpo_capibara(esqueleto, especie: str, datos: dict):
         partes.append(esfera(f"fosa_{s}", fosa, (nariz[0] * 0.16, 0.01, nariz[2] * 0.2), m["ojo"], "cabeza", 10))
         partes.append(esfera(f"ojo_{s}", (s * 0.10, -0.08, CZ + 0.07), (0.03, 0.024, 0.03), m["ojo"], "cabeza", 16))
         partes.append(esfera(f"brillo_{s}", (s * 0.092, -0.102, CZ + 0.082), (0.009, 0.006, 0.009), brillo_ojo, "cabeza", 8))
+        partes.append(esfera(f"mejilla_rosa_{s}", (s * 0.112, -0.17, CZ - 0.025), (0.03, 0.03, 0.028), m["rosa"], "cabeza", 14))
 
     for lado in LADOS:
         a = articulaciones(lado)
@@ -337,8 +344,21 @@ def distancia_segmento(p: Vector, a: Vector, b: Vector) -> tuple[float, float]:
     return (p - (a + ab * t)).length, t
 
 
+FORMAS_PERSONA = {  # medidas (m) del cuerpo de "persona"; otra especie cambia solo las suyas en "formas"
+    "cintura_z": 1.08, "pecho_z": 1.255,
+    "pelvis": (0.155, 0.1, 0.115), "cintura": (0.13, 0.082, 0.16), "pecho": (0.165, 0.094, 0.145),
+    "hombros": (0.185, 0.09, 0.068), "busto": None,
+    "craneo": (0.09, 0.106, 0.116), "mandibula": (0.07, 0.074, 0.058), "nariz": (0.014, 0.02, 0.026),
+    "cabello": (0.098, 0.114, 0.098), "cuello": 0.05,
+    "deltoides": (0.046, 0.045, 0.05), "brazo": (0.047, 0.04), "antebrazo": (0.04, 0.03), "mano": (0.026, 0.04, 0.072),
+    "gluteo": (0.082, 0.072, 0.088), "muslo": (0.083, 0.057), "cuadriceps": (0.072, 0.07, 0.13),
+    "pierna": (0.054, 0.036), "gemelo": (0.053, 0.056, 0.1),
+    "zapatilla": (0.056, 0.142, 0.048), "talon": (0.05, 0.054, 0.05),
+}
+
+
 def cuerpo_persona(esqueleto, especie: str, datos: dict):
-    """Persona deportiva de 1.70 m en una sola superficie continua y suave.
+    """Persona deportiva (persona, mujer) en una sola superficie continua y suave.
 
     Se arma con formas solapadas y luego se funde con un remallado por vóxeles (desaparecen las
     uniones), se suaviza, se reduce a un número de polígonos liviano para el navegador, se viste
@@ -366,43 +386,58 @@ def cuerpo_persona(esqueleto, especie: str, datos: dict):
         coronilla = p.z > cabeza.z + 0.025 and not (p.y < cabeza.y - 0.075 and p.z < cabeza.z + 0.07)
         return "cabello" if nuca or coronilla else "piel"
 
+    f = {**FORMAS_PERSONA, **datos.get("formas", {})}  # medidas de esta persona
     # Tronco: pelvis, cintura, pecho y la línea de los hombros.
-    elipsoide("pelvis", (0, 0.005, P["cadera_z"] + 0.03), (0.155, 0.1, 0.115), "raiz", "short", 40)
-    elipsoide("cintura", (0, 0.0, 1.08), (0.13, 0.082, 0.16), "columna", "camiseta", 40)
-    elipsoide("pecho", (0, -0.004, 1.255), (0.165, 0.094, 0.145), "columna", "camiseta", 40)
-    elipsoide("hombros", (0, 0.005, 1.37), (0.185, 0.09, 0.068), "columna", "camiseta", 40)
+    elipsoide("pelvis", (0, 0.005, P["cadera_z"] + 0.03), f["pelvis"], "raiz", "short", 40)
+    elipsoide("cintura", (0, 0.0, f["cintura_z"]), f["cintura"], "columna", "camiseta", 40)
+    elipsoide("pecho", (0, -0.004, f["pecho_z"]), f["pecho"], "columna", "camiseta", 40)
+    elipsoide("hombros", (0, 0.005, P["hombro_z"] - 0.05), f["hombros"], "columna", "camiseta", 40)
     # Cabeza: cráneo, mandíbula, nariz, orejas y el volumen del cabello.
-    elipsoide("craneo", cabeza, (0.09, 0.106, 0.116), "cabeza", cabello_o_piel, 48)
-    elipsoide("mandibula", cabeza + Vector((0, -0.028, -0.06)), (0.07, 0.074, 0.058), "cabeza", "piel", 40)
-    elipsoide("nariz", cabeza + Vector((0, -0.106, -0.012)), (0.014, 0.02, 0.026), "cabeza", "piel", 16)
-    elipsoide("cabello", cabeza + Vector((0, 0.014, 0.034)), (0.098, 0.114, 0.098), "cabeza", cabello_o_piel, 48)
-    tubo("cuello", Vector((0, 0.0, cz - 0.05)), Vector((0, 0.005, cz + 0.07)), 0.05, 0.05, "cabeza", "piel")
+    elipsoide("craneo", cabeza, f["craneo"], "cabeza", cabello_o_piel, 48)
+    elipsoide("mandibula", cabeza + Vector((0, -0.028, -0.06)), f["mandibula"], "cabeza", "piel", 40)
+    elipsoide("nariz", cabeza + Vector((0, -0.106, -0.012)), f["nariz"], "cabeza", "piel", 16)
+    elipsoide("cabello", cabeza + Vector((0, 0.014, 0.034)), f["cabello"], "cabeza", cabello_o_piel, 48)
+    elipsoide("flequillo", cabeza + Vector((0, -0.058, 0.084)), (0.082, 0.05, 0.032), "cabeza", "cabello", 32)
+    tubo("cuello", Vector((0, 0.0, cz - 0.05)), Vector((0, 0.005, cz + 0.07)), f["cuello"], f["cuello"], "cabeza", "piel")
     for s in (1, -1):
         elipsoide(f"oreja_{s}", cabeza + Vector((s * 0.09, 0.008, -0.004)), (0.014, 0.024, 0.032), "cabeza", "piel", 16)
+    if datos.get("cola_de_caballo"):
+        # Separada de la espalda para que el remallado no la funda con la camiseta.
+        base, medio, punta = (cabeza + Vector((0, y, z)) for y, z in ((0.095, 0.03), (0.17, -0.07), (0.165, -0.21)))
+        tubo("cola_alta", base, medio, 0.03, 0.04, "cabeza", "cabello")
+        tubo("cola_baja", medio, punta, 0.04, 0.018, "cabeza", "cabello")
+    if f["busto"]:
+        for s in (1, -1):
+            elipsoide(f"busto_{s}", (s * 0.05, -0.05, f["pecho_z"] - 0.015), f["busto"], "columna", "camiseta", 24)
     for lado, s in LADOS.items():
         a = articulaciones(lado)
         pierna = f"pierna_{lado}"
-        elipsoide(f"deltoides_{lado}", a["hombro"] + Vector((s * 0.004, 0, -0.012)), (0.052, 0.05, 0.056),
+        elipsoide(f"deltoides_{lado}", a["hombro"] + Vector((s * 0.004, 0, -0.012)), f["deltoides"],
                   f"brazo_{lado}", "camiseta", 24)
         manga = lambda p, a=a: "camiseta" if distancia_segmento(p, a["hombro"], a["codo"])[1] < 0.4 else "piel"
-        tubo(f"brazo_{lado}", a["hombro"], a["codo"], 0.047, 0.04, f"brazo_{lado}", manga)
-        tubo(f"antebrazo_{lado}", a["codo"], a["muneca"], 0.04, 0.03, f"antebrazo_{lado}", "piel")
-        elipsoide(f"mano_{lado}", a["muneca"] + Vector((s * 0.004, -0.004, -0.075)), (0.026, 0.04, 0.072),
+        tubo(f"brazo_{lado}", a["hombro"], a["codo"], *f["brazo"], f"brazo_{lado}", manga)
+        tubo(f"antebrazo_{lado}", a["codo"], a["muneca"], *f["antebrazo"], f"antebrazo_{lado}", "piel")
+        elipsoide(f"mano_{lado}", a["muneca"] + Vector((s * 0.004, -0.004, -0.075)), f["mano"],
                   f"antebrazo_{lado}", "piel", 24)
-        elipsoide(f"gluteo_{lado}", (s * 0.075, 0.042, P["cadera_z"] - 0.04), (0.082, 0.072, 0.088), "raiz", "short", 24)
+        elipsoide(f"pulgar_{lado}", a["muneca"] + Vector((s * 0.002, -0.034, -0.06)), (0.011, 0.014, 0.03),
+                  f"antebrazo_{lado}", "piel", 16)
+        elipsoide(f"gluteo_{lado}", (s * 0.075, 0.042, P["cadera_z"] - 0.04), f["gluteo"], "raiz", "short", 24)
         # Muslo: el short cubre la parte de arriba; debajo, las mallas (la pierna que se fortalece).
         short = lambda p, a=a, pierna=pierna: "short" if distancia_segmento(p, a["cadera"], a["rodilla"])[1] < 0.2 else pierna
-        tubo(f"muslo_{lado}", a["cadera"], a["rodilla"], 0.083, 0.057, f"muslo_{lado}", short)
+        tubo(f"muslo_{lado}", a["cadera"], a["rodilla"], *f["muslo"], f"muslo_{lado}", short)
         elipsoide(f"cuadriceps_{lado}", a["cadera"].lerp(a["rodilla"], 0.4) + Vector((0, -0.01, 0)),
-                  (0.072, 0.07, 0.13), f"muslo_{lado}", short, 24)
-        tubo(f"pierna_{lado}", a["rodilla"], a["tobillo"], 0.054, 0.036, f"pierna_{lado}", pierna)
+                  f["cuadriceps"], f"muslo_{lado}", short, 24)
+        tubo(f"pierna_{lado}", a["rodilla"], a["tobillo"], *f["pierna"], f"pierna_{lado}", pierna)
         elipsoide(f"gemelo_{lado}", a["rodilla"].lerp(a["tobillo"], 0.3) + Vector((0, 0.016, 0)),
-                  (0.053, 0.056, 0.1), f"pierna_{lado}", pierna, 24)
+                  f["gemelo"], f"pierna_{lado}", pierna, 24)
         # Zapatilla: cuerpo alargado y talón redondeado.
         centro = (a["tobillo"] + a["punta"]) / 2 + Vector((0, 0.01, -0.018))
-        elipsoide(f"zapatilla_{lado}", centro, (0.056, 0.142, 0.048), f"pie_{lado}", "zapatilla", 32)
-        elipsoide(f"talon_{lado}", a["tobillo"] + Vector((0, 0.035, -0.035)), (0.05, 0.054, 0.05),
+        elipsoide(f"zapatilla_{lado}", centro, f["zapatilla"], f"pie_{lado}", "zapatilla", 32)
+        elipsoide(f"talon_{lado}", a["tobillo"] + Vector((0, 0.035, -0.035)), f["talon"],
                   f"pie_{lado}", "zapatilla", 24)
+        ancho_suela, largo_suela, _ = f["zapatilla"]
+        elipsoide(f"suela_{lado}", centro + Vector((0, 0.004, -0.034)), (ancho_suela * 1.04, largo_suela * 1.03, 0.02),
+                  f"pie_{lado}", "suela", 32)
 
     cuerpo = unir(partes, especie)
     # 1. Fundir todo en una sola superficie cerrada (sin uniones entre piezas).
@@ -415,7 +450,7 @@ def cuerpo_persona(esqueleto, especie: str, datos: dict):
     bpy.ops.object.modifier_apply(modifier=suavizar.name)
     # 3. Liviano para el navegador (~30 000 triángulos).
     reducir = cuerpo.modifiers.new("reducir", "DECIMATE")
-    reducir.ratio = min(1.0, 15000 / max(1, len(cuerpo.data.polygons)))
+    reducir.ratio = min(1.0, 20000 / max(1, len(cuerpo.data.polygons)))  # los bordes de la ropa salen más limpios
     bpy.ops.object.modifier_apply(modifier=reducir.name)
     cuerpo.data.validate()  # quita caras degeneradas que deja la reducción
     bpy.ops.object.shade_smooth()
@@ -429,6 +464,7 @@ def cuerpo_persona(esqueleto, especie: str, datos: dict):
         "camiseta": material("camiseta", srgb(colores["camiseta"]), 0.5),
         "short": material("short", srgb(colores["short"]), 0.7),
         "zapatilla": material("zapatilla", srgb(colores["zapatilla"]), 0.4),
+        "suela": material("suela", srgb(colores["camiseta"]), 0.6),  # del color de la camiseta
         "pierna_izq": material("pelaje_pierna_izq", srgb(colores["mallas"]), 0.7),  # la pierna que se fortalece
         "pierna_der": material("pelaje_pierna_der", srgb(colores["mallas"]), 0.7),
     }
@@ -458,13 +494,32 @@ def cuerpo_persona(esqueleto, especie: str, datos: dict):
     ojo = material("ojos", srgb("#1c1410"), 0.2)
     brillo = material("brillo_ojos", (1, 1, 1), 0.1, emision=(1, 1, 1), intensidad=2)
     boca = material("boca", srgb("#b4615a"), 0.5)
+    blanco = material("blanco_ojos", srgb("#fbfbf8"), 0.3)
+    mejilla = material("mejillas", srgb("#e98f8a"), 0.7)
     for s in (1, -1):
-        rasgos.append(esfera(f"ojo_{s}", cabeza + Vector((s * 0.034, -0.094, 0.012)), (0.012, 0.008, 0.014), ojo, "cabeza", 16))
-        rasgos.append(esfera(f"brillo_{s}", cabeza + Vector((s * 0.031, -0.101, 0.017)), (0.0035, 0.002, 0.0035),
+        rasgos.append(esfera(f"blanco_{s}", cabeza + Vector((s * 0.035, -0.089, 0.014)), (0.019, 0.01, 0.021), blanco, "cabeza", 20))
+        rasgos.append(esfera(f"ojo_{s}", cabeza + Vector((s * 0.034, -0.096, 0.013)), (0.0115, 0.006, 0.0135), ojo, "cabeza", 16))
+        rasgos.append(esfera(f"brillo_{s}", cabeza + Vector((s * 0.03, -0.101, 0.019)), (0.004, 0.002, 0.004),
                              brillo, "cabeza", 8))
-        rasgos.append(esfera(f"ceja_{s}", cabeza + Vector((s * 0.035, -0.097, 0.04)), (0.022, 0.006, 0.005),
+        rasgos.append(esfera(f"ceja_{s}", cabeza + Vector((s * 0.036, -0.096, 0.045)), (0.022, 0.006, 0.0045),
                              mats["cabello"], "cabeza", 12))
-    rasgos.append(esfera("boca", cabeza + Vector((0, -0.094, -0.052)), (0.02, 0.005, 0.0045), boca, "cabeza", 12))
+        rasgos.append(esfera(f"mejilla_{s}", cabeza + Vector((s * 0.052, -0.079, -0.026)), (0.016, 0.006, 0.011), mejilla, "cabeza", 12))
+    # Ropa deportiva: pulsera de neón en cada muñeca, franja en la zapatilla y ribete en el cuello.
+    acento = material("acento_ropa", srgb(colores.get("acento", "#00e5ff")), 0.35,
+                      emision=srgb(colores.get("acento", "#00e5ff")), intensidad=0.6)
+    for lado, s in LADOS.items():
+        a = articulaciones(lado)
+        rasgos.append(toro(f"pulsera_{lado}", a["muneca"] + Vector((0, 0, 0.035)), 0.034, 0.008, acento, f"antebrazo_{lado}"))
+        centro = (a["tobillo"] + a["punta"]) / 2 + Vector((0, 0.01, -0.018))
+        ancho_z = f["zapatilla"][0]
+        rasgos.append(esfera(f"franja_{lado}", centro + Vector((s * ancho_z * 0.93, 0.012, 0.004)), (0.006, 0.075, 0.012),
+                             acento, f"pie_{lado}", 16))
+    rasgos.append(toro("ribete_cuello", Vector((0, 0.003, cz - 0.035)), f["cuello"] + 0.004, 0.006, acento, "columna"))
+    # Sonrisa: una fila de cuentas que sube hacia las comisuras.
+    for i in range(-3, 4):
+        x = i * 0.0062
+        rasgos.append(esfera(f"boca_{i}", cabeza + Vector((x, -0.094 + abs(i) * 0.0012, -0.056 + 0.0011 * i * i)),
+                             (0.0048, 0.0042, 0.0042), boca, "cabeza", 8))
     for r in rasgos:
         r.vertex_groups.clear()
     cuerpo = unir([cuerpo] + rasgos, especie)
@@ -498,8 +553,21 @@ ESPECIES = {
     # nariz: tamaño de la nariz en la punta del hocico (ancha de capibara o pequeña de conejo).
     # banda: (centro y, centro z, radio) de la banda del guía.
     "persona": {"proporciones": "humano", "cuerpo": cuerpo_persona, "banda": (0.0, 1.665, 0.104),
-                "colores": {"piel": "#d9a07a", "cabello": "#2a1d17", "camiseta": "#ff2e97", "short": "#14172a",
+                "colores": {"piel": "#d9a07a", "cabello": "#2a1d17", "camiseta": "#ff2e97", "short": "#14172a", "acento": "#00e5ff",
                             "mallas": "#2b3150", "zapatilla": "#f2f3f7"}},
+    "mujer": {"proporciones": "mujer", "cuerpo": cuerpo_persona, "banda": (0.0, 1.615, 0.1), "cola_de_caballo": True,
+              "colores": {"piel": "#c98f68", "cabello": "#3a2016", "camiseta": "#8b5cf6", "short": "#1a1633", "acento": "#ffe14d",
+                          "mallas": "#2f2a55", "zapatilla": "#f2f3f7"},
+              "formas": {"cintura_z": 1.06, "pecho_z": 1.215,
+                         "pelvis": (0.15, 0.1, 0.112), "cintura": (0.116, 0.076, 0.155), "pecho": (0.146, 0.09, 0.145),
+                         "hombros": (0.168, 0.08, 0.072), "busto": (0.066, 0.05, 0.06),
+                         "craneo": (0.086, 0.102, 0.112), "mandibula": (0.062, 0.068, 0.054), "nariz": (0.012, 0.018, 0.022),
+                         "cabello": (0.095, 0.11, 0.096), "cuello": 0.046,
+                         "deltoides": (0.039, 0.04, 0.044), "brazo": (0.042, 0.036), "antebrazo": (0.036, 0.027),
+                         "mano": (0.022, 0.034, 0.064),
+                         "gluteo": (0.078, 0.06, 0.08), "muslo": (0.082, 0.058), "cuadriceps": (0.069, 0.067, 0.125),
+                         "pierna": (0.052, 0.035), "gemelo": (0.05, 0.053, 0.1),
+                         "zapatilla": (0.05, 0.13, 0.044), "talon": (0.045, 0.05, 0.046)}},
     "toribara": {"proporciones": "capibara", "cuerpo": cuerpo_capibara, "banda": (0.02, CZ + 0.08, 0.165),
                  "pelaje": "#9a5b34", "panza": "#e8c39a", "oscuro": "#2b1a14", "nariz": "#2b1a14",
                  "nariz_tamano": (0.10, 0.035, 0.06), "detalles": detalles_toribara},
@@ -628,7 +696,10 @@ def vistas_previas(carpeta: Path, especie: str) -> None:
 def main() -> None:
     argumentos = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
     CARPETA_WEB.mkdir(parents=True, exist_ok=True)
+    solo = argumentos[1:]  # si se nombran especies, las demás no se regeneran
     for especie, datos in ESPECIES.items():
+        if solo and especie not in solo:
+            continue
         P.clear()
         P.update(PROPORCIONES[datos["proporciones"]])
         limpiar_escena()

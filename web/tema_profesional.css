@@ -1,0 +1,143 @@
+/* Tema profesional: sobrio y sin adornos, para un público adulto. Se activa con
+   <html data-tema="profesional"> (web/tema.js) y no cambia nada del tema actual (prueba.css).
+
+   Sigue el modo claro u oscuro del sistema: cada color es un par light-dark(). El escenario 3D y los
+   lienzos del esqueleto son "islas" siempre oscuras (color-scheme: dark), así que dentro de ellas los
+   mismos pares se resuelven a su valor oscuro sin repetir reglas.
+   Contraste comprobado: texto ≥ 4,5:1 y bordes de controles ≥ 3:1 sobre sus fondos, en ambos modos. */
+:root[data-tema="profesional"] {
+  color-scheme: light dark;
+  --fondo: light-dark(#f3f5f8, #0f141b); --fondo-2: light-dark(#e9edf2, #151c26);
+  --panel: light-dark(#ffffff, #18202b); --panel-solido: light-dark(#ffffff, #18202b);
+  --texto: light-dark(#17212e, #e8edf3); --suave: light-dark(#4f5d72, #a3afc0);
+  --borde: light-dark(#d3d9e1, #2c3848); --borde-control: light-dark(#75818f, #7b899c);
+  --acento: light-dark(#1b4f9c, #8ab4f8); --sobre-acento: light-dark(#ffffff, #0c1622);
+  --acento-tenue: color-mix(in oklab, var(--acento) 10%, var(--panel));
+  /* Los colores de fiesta del tema actual se reducen a un acento y tres colores de estado. */
+  --rosa: var(--acento); --cian: var(--acento); --morado: var(--acento); --amarillo: var(--texto);
+  --lima: light-dark(#1a7339, #6fd49a); --ok: var(--lima);
+  --mal: light-dark(#b3261e, #ff9389);
+  --naranja: light-dark(#8f5200, #f0b35a); --advertencia: var(--naranja);
+  --brillo-rosa: 0 0 0 transparent; --brillo-cian: 0 0 0 transparent;
+  --sombra: 0 1px 2px rgb(0 0 0 / .08), 0 2px 8px rgb(0 0 0 / .06);
+  accent-color: var(--acento);
+  scrollbar-color: var(--borde-control) transparent;
+
+  body { background: var(--fondo); color: var(--texto); font-family: "Segoe UI", system-ui, -apple-system, sans-serif; font-weight: 400; }
+  ::selection { background: var(--acento); color: var(--sobre-acento); }
+
+  /* Sin adornos: ni estrellas, ni mascotas, ni brillos animados. */
+  .estrellas, .mascotas, .globo, .destello, .logo-marco::before, .boton-menu.primario::after { display: none; }
+  .logo-grande, .logo-marco, .lema, .chip.ok::before, .fila-personajes .personaje[aria-checked="true"] { animation: none; }
+
+  /* El logo en un solo color: su propia forma como máscara sobre el color del texto. */
+  .logo-grande, .logo-chico { object-fit: none; object-position: 200vw 0; background: var(--texto); filter: none;
+                              -webkit-mask: url("logo_sobrio.svg") center / contain no-repeat; mask: url("logo_sobrio.svg") center / contain no-repeat; }
+  .logo-grande { width: min(360px, 70vw); aspect-ratio: 3; }
+  .logo-chico { aspect-ratio: 3; }
+  .logo-chico:hover { transform: none; }
+
+  /* Tipografía */
+  h1, .paso-titulo, .lema, .cifras-progreso strong { background: none; -webkit-background-clip: border-box; background-clip: border-box; color: var(--texto); }
+  h1, .barra-superior h1 { font-size: 1.35rem; font-weight: 600; letter-spacing: 0; }
+  h2 { font-weight: 600; letter-spacing: 0; }
+  strong, th, button, .chip, .mensaje, .instruccion { font-weight: 600; }
+  .lema { font-size: .95rem; letter-spacing: 1.5px; color: var(--suave); }
+  .tarjeta-manual h2::before, .titulo-mejoria::before { width: 3px; background: var(--acento); box-shadow: none; }
+
+  /* Botones y campos */
+  button { border-radius: 8px; border: 1px solid var(--borde-control); background: var(--panel); color: var(--texto);
+           box-shadow: none; backdrop-filter: none; transition: background-color .12s ease, border-color .12s ease; }
+  button:hover { transform: none; filter: none; background: var(--acento-tenue); border-color: var(--acento); box-shadow: none; }
+  button:active { transform: none; }
+  button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--acento); outline-offset: 2px; box-shadow: none; }
+  .primario, .boton-menu.primario, #btn_calibrar, #btn_crear_jugador, #btn_comenzar {
+    background: var(--acento); border-color: var(--acento); color: var(--sobre-acento); box-shadow: none; }
+  .primario:hover, .boton-menu.primario:hover, #btn_calibrar:hover, #btn_crear_jugador:hover, #btn_comenzar:hover {
+    background: color-mix(in oklab, var(--acento) 86%, black); box-shadow: none; }
+  button[data-comando=detener], .controles-sesion .detener { border-color: var(--mal); color: var(--mal); background: var(--panel); }
+  .boton-menu, .boton-menu.primario { font-size: 1.05rem; padding: 12px 24px; }
+  .menu-botones { width: min(300px, 80vw); gap: 10px; }
+  .formulario input, .formulario select, .filtros-progreso select { background: var(--panel); border: 1px solid var(--borde-control); border-radius: 6px; }
+  [aria-checked="true"]:is(.periodo button, .selector-lado button, .camara), .ejercicio-manual[aria-pressed="true"] {
+    background: var(--acento-tenue); border-color: var(--acento); color: var(--acento); box-shadow: none; }
+
+  /* Superficies */
+  .tarjeta, .tarjeta-manual, aside, .cifras-progreso div {
+    background: var(--panel); border: 1px solid var(--borde); border-radius: 10px; box-shadow: var(--sombra); backdrop-filter: none; }
+  .tarjeta:hover, .cifras-progreso div:hover { transform: none; box-shadow: var(--sombra); }
+  .metricas div, .mensaje, .tarjeta-ejercicio .dato { background: var(--fondo-2); }
+  .chip, .mensaje, .panel-referencia, .metricas div { border-radius: 6px; border-width: 1px; }
+  .chip { background: var(--panel); }
+  .chip.ok { box-shadow: none; }
+  .tooltip { border: 1px solid var(--borde-control); border-radius: 6px; box-shadow: var(--sombra); }
+  .columna-tiempo.activa { fill: color-mix(in oklab, var(--acento) 70%, var(--panel)); }
+  tbody tr:hover { background: var(--acento-tenue); }
+  code { background: var(--fondo-2); }
+  .indice-manual a:hover { background: var(--acento-tenue); border-left-color: var(--acento); }
+  .tarjeta .cifra, .reto-datos strong { color: var(--texto); text-shadow: none; }
+  .progreso div, .progreso.grande div, #barra_amplitud, .ejecucion-relleno, .hud-medidor-relleno { background: var(--acento); }
+  #barra_amplitud.en_objetivo, .ejecucion-relleno.en_objetivo, .hud-medidor-relleno.en_objetivo { background: var(--ok); box-shadow: none; }
+
+  /* Selección de personaje */
+  .fila-personajes .personaje { background: var(--panel); border: 1px solid var(--borde); border-radius: 10px; backdrop-filter: none; }
+  .fila-personajes .personaje:hover { transform: none; border-color: var(--acento); box-shadow: none; }
+  .fila-personajes .personaje[aria-checked="true"] { background: var(--acento-tenue); border-color: var(--acento); box-shadow: 0 0 0 1px var(--acento); }
+  .fila-personajes .personaje strong { font-size: 1.15rem; }
+  .vista-personaje { background: var(--fondo-2); border-radius: 6px; }
+  .pasos-sesion li { border-width: 1px; border-radius: 6px; background: var(--panel); }
+  .pasos-sesion li.hecho { border-color: var(--ok); }
+  .pasos-sesion li.actual { background: var(--acento); color: var(--sobre-acento); box-shadow: none; }
+
+  /* Islas oscuras: el escenario 3D, las demostraciones y el lienzo del esqueleto. */
+  .escena, .demo-3d, .lienzo-ajustes { color-scheme: dark; color: var(--texto); }
+  .escena { border: 1px solid var(--borde); border-radius: 10px; box-shadow: none; background: linear-gradient(180deg, #161d28, #0d1219); }
+  .demo-3d, .lienzo-ajustes { border: 1px solid var(--borde); border-radius: 8px; background: #111822; }
+  .miniatura { border-width: 1px; border-radius: 6px; background: rgb(13 18 25 / .85); }
+  .tarjeta-paso, .juego-hud { background: rgb(17 24 34 / .94); border: 1px solid var(--borde); border-radius: 10px; box-shadow: none; }
+  .tarjeta-ejercicio { border-radius: 8px; background: var(--panel); }
+  .tarjeta-ejercicio:hover { transform: none; background: var(--acento-tenue); border-color: var(--acento); box-shadow: none; }
+  .controles-sesion button, .detener-flotante[data-comando=detener] { background: var(--panel); }
+  .rotulo { border-width: 1px; border-radius: 6px; box-shadow: none; color: var(--texto); }
+  .aviso { border-radius: 6px; background: #8c1d18; color: #fff; box-shadow: none; }
+  .aviso-vista { background: #1f3352; }
+  .aviso-compensacion { background: #7a4a00; }
+  .cuenta, .cuenta.listo, .reps-grande, .hud-reps, .hud-angulo, .ejecucion-cabecera strong { color: var(--texto); text-shadow: none; }
+  .cuenta.listo { color: var(--ok); }
+  .celebracion { font-size: clamp(1.6rem, 4vw, 2.6rem); font-weight: 600; letter-spacing: 0; -webkit-text-stroke: 0; }
+  .celebracion:is(.perfecto, .bien, .casi, .serie) { text-shadow: 0 1px 6px rgb(0 0 0 / .6); }
+  .celebracion.bien, .celebracion.serie { color: var(--texto); }
+  .ejecucion-meta, .hud-medidor-meta, #marca_objetivo { box-shadow: none; }
+
+  .insignia { border-width: 1px; border-radius: 8px; color: var(--acento); background: var(--acento-tenue); border-color: var(--borde); }
+  .tarjeta-ejercicio:hover .insignia { color: var(--acento); border-color: var(--acento); }
+  .pip { border-width: 1px; border-color: var(--borde-control); }
+  .pip.perfecto, .pip.bien { box-shadow: none; }
+  .pip.bien { background: var(--acento); border-color: var(--acento); }
+  .pip.nuevo, .juego-hud.fallo { animation: none; }
+  .estrella.ganada { background: var(--acento); filter: none; }
+  .estrella { animation: none; }
+  .carga { background: var(--fondo); }
+  .logo-carga { animation: none; background: var(--texto); object-fit: none; object-position: 200vw 0; aspect-ratio: 3;
+                -webkit-mask: url("logo_sobrio.svg") center / contain no-repeat; mask: url("logo_sobrio.svg") center / contain no-repeat; }
+  .barra-carga div { background: var(--acento); }
+  .chip.racha, .chip.racha.encendida { color: var(--naranja); background: var(--panel); border-color: var(--borde-control); box-shadow: none; }
+  .llama-grande, .tarjeta-racha.encendida .llama-grande { animation: none; filter: none; background: var(--fondo-2); }
+  .tarjeta-racha.encendida .llama-grande { color: var(--naranja); }
+  .logro { border-radius: 8px; background: var(--fondo-2); }
+  .logro.obtenido { background: var(--acento-tenue); box-shadow: inset 0 0 0 1px var(--acento); }
+  .logro.obtenido .medalla, .aviso-logro .medalla { background: var(--acento); color: var(--sobre-acento); box-shadow: none; }
+  .avance-logro div { background: var(--acento); }
+  .aviso-logro { border-radius: 10px; border-width: 1px; border-color: var(--acento); box-shadow: none; }
+  .texto-logro small { color: var(--acento); }
+  .dialogo { border-radius: 10px; border-width: 1px; border-color: var(--borde); background: var(--panel); box-shadow: var(--sombra); }
+  .dialogo[open] { animation: none; }
+  .tutorial-icono { color: var(--acento); background: var(--acento-tenue); border-width: 1px; border-color: var(--borde); }
+  .tutorial-puntos span.activo { background: var(--acento); }
+  .escala-sus label { border-width: 1px; border-radius: 6px; }
+  .escala-sus label:has(input:checked) { border-color: var(--acento); background: var(--acento-tenue); }
+  .escenario { border-radius: 8px; }
+  .escenario[aria-checked="true"] { border-color: var(--acento); box-shadow: 0 0 0 1px var(--acento); }
+  .boton-sonido { border-radius: 8px; background: var(--panel); backdrop-filter: none; }
+  .pie-menu { color: var(--suave); }
+}

@@ -19,6 +19,12 @@ class Compensacion:
 
 
 @dataclass(frozen=True)
+class TalonApoyado:
+    elevacion_max: float  # cuánto puede subir el talón, en largos de pierna (rodilla a tobillo)
+    mensaje: str
+
+
+@dataclass(frozen=True)
 class ReglaEjercicio:
     clave: str
     nombre: str
@@ -33,6 +39,7 @@ class ReglaEjercicio:
     inicio: float  # arriba: ángulo máximo de partida; abajo: ángulo mínimo de partida
     retorno: float  # ángulo al que hay que volver para cerrar la repetición
     compensacion: Compensacion | None
+    talon_apoyado: TalonApoyado | None
 
     def meta_valida(self, meta: float) -> bool:
         """La meta nunca puede exigir más que el límite fisiológico de referencia (regla 1)."""
@@ -68,6 +75,7 @@ class ParametrosAdaptacion:
 class Reglas:
     tolerancia_medicion: float
     tolerancia_meta: float
+    fraccion_casi: float
     visibilidad_minima: float
     salto_maximo: float
     calibracion: ParametrosCalibracion
@@ -98,10 +106,12 @@ def cargar(ruta: Path = RUTA) -> Reglas:
             inicio=e["inicio_max"] if arriba else e["inicio_min"],
             retorno=e["inicio_max"] if arriba else e["retorno_min"],
             compensacion=Compensacion(comp["angulo"], comp["max"], comp["mensaje"]) if comp else None,
+            talon_apoyado=TalonApoyado(**e["talon_apoyado"]) if e.get("talon_apoyado") else None,
         )
     return Reglas(
         tolerancia_medicion=datos["tolerancia_medicion"],
         tolerancia_meta=datos["tolerancia_meta"],
+        fraccion_casi=datos["fraccion_casi"],
         visibilidad_minima=datos["visibilidad_minima"],
         salto_maximo=datos["salto_maximo"],
         calibracion=ParametrosCalibracion(**datos["calibracion"]),

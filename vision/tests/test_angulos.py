@@ -5,8 +5,8 @@ import pytest
 from app.estimador import Landmark
 from app.filtros import Antirrebote, FiltroOneEuro
 from app.geometria import angulo_3p
-from app.miembro_inferior import (INDICES, calcular_angulos, encuadre_ok, hacia_donde_mira, puntos_faltantes,
-                                  vista)
+from app.miembro_inferior import (INDICES, calcular_angulos, encuadre_ok, hacia_donde_mira, muslo_hacia_adelante,
+                                  puntos_faltantes, vista)
 from tests.cuerpo import ALTO, ANCHO, cuerpo_lateral
 
 
@@ -74,8 +74,8 @@ def test_cabeza_girada_contra_el_pie_no_decide_la_direccion():
     lms = cuerpo_lateral(mira=1)
     nariz = lms[0]
     lms[0] = Landmark(nariz.x - 30 / ANCHO, nariz.y, nariz.z, nariz.visibilidad)
-    assert hacia_donde_mira(lms, ANCHO) is None
-    assert hacia_donde_mira(cuerpo_lateral(mira=1), ANCHO) == 1
+    assert hacia_donde_mira(lms, ANCHO, ALTO) is None
+    assert hacia_donde_mira(cuerpo_lateral(mira=1), ANCHO, ALTO) == 1
 
 
 def test_direccion_dada_por_quien_llama():
@@ -93,14 +93,14 @@ def test_direccion_queda_fija_durante_una_actividad():
     t = 0
     for _ in range(50):
         t += 40
-        bucle._mira(derecha, ANCHO, t)
-    assert bucle._mira(derecha, ANCHO, t) == 1
+        bucle._mira(derecha, ANCHO, ALTO, t)
+    assert bucle._mira(derecha, ANCHO, ALTO, t) == 1
     bucle.enviar_comando({"nombre": "calibrar", "ejercicio": "knee_flexion_standing", "lado": "der"})
     bucle._atender_comandos()
     bucle._controlador.actividad.vista_ok = True
     for _ in range(100):  # 4 s leyendo lo contrario: durante la actividad no cambia
         t += 40
-        assert bucle._mira(izquierda, ANCHO, t) == 1
+        assert bucle._mira(izquierda, ANCHO, ALTO, t) == 1
 
 
 def test_rodilla_muy_doblada_no_invierte_el_signo():
@@ -120,7 +120,9 @@ def test_baja_visibilidad_descarta_el_angulo():
 # --- vista y encuadre ---------------------------------------------------------
 
 def test_vista_lateral_y_lado_hacia_la_camara():
-    assert vista(cuerpo_lateral(lado="der"), ANCHO, ALTO) == {"lateral": True, "lado_camara": "der", "razon": 0.04}
+    v = vista(cuerpo_lateral(lado="der"), ANCHO, ALTO)
+    assert v.pop("talon")["der"] is not None
+    assert v == {"lateral": True, "lado_camara": "der", "razon": 0.04, "muslo_horizontal": False}
     assert vista(cuerpo_lateral(lado="izq"), ANCHO, ALTO)["lado_camara"] == "izq"
 
 
@@ -164,3 +166,49 @@ def test_one_euro_reduce_ruido_sin_perder_el_nivel():
     salida = [filtro.aplicar(x, i / 30) for i, x in enumerate(ruido)]
     assert max(salida[30:]) - min(salida[30:]) < (max(ruido[30:]) - min(ruido[30:])) / 2
     assert salida[-1] == pytest.approx(0.5, abs=0.01)
+
+
+def sentado_sin_cara_ni_pie(rodilla=90, mira=1):
+    """Sentado, con la cabeza hacia la pantalla y el pie mal visto: solo se ven hombro, cadera,
+    rodilla y tobillo (un caso real: −90° en lugar de 90° y la calibración nunca veía intentos)."""
+    lms = cuerpo_lateral(cadera=90, rodilla=rodilla, mira=mira)
+    for i in (0, 7, 8, INDICES["talon_der"], INDICES["pie_der"]):
+        lms[i] = Landmark(lms[i].x, lms[i].y, lms[i].z, 0.2)
+    return lms
+
+
+def test_muslo_horizontal_dice_hacia_donde_mira():
+    assert hacia_donde_mira(sentado_sin_cara_ni_pie(mira=1), ANCHO, ALTO) == 1
+    assert hacia_donde_mira(sentado_sin_cara_ni_pie(mira=-1), ANCHO, ALTO) == -1
+
+
+def test_muslo_horizontal_gana_a_la_cabeza_girada():
+    lms = cuerpo_lateral(cadera=90, rodilla=90, mira=1)
+    nariz = lms[0]
+    lms[0] = Landmark(nariz.x - 40 / ANCHO, nariz.y, nariz.z, nariz.visibilidad)  # mira la pantalla
+    assert hacia_donde_mira(lms, ANCHO, ALTO) == 1
+
+
+def test_de_pie_el_muslo_no_decide():
+    lms = cuerpo_lateral(mira=-1)
+    assert muslo_hacia_adelante(lms, ANCHO, ALTO) is None
+    assert hacia_donde_mira(lms, ANCHO, ALTO) == -1
+
+
+def test_sentado_corrige_una_direccion_vieja_durante_la_calibracion():
+    from app.captura import BucleCaptura
+    bucle = BucleCaptura(estimador=None, publicar=lambda m: None)
+    t = 0
+    for _ in range(50):  # antes estaba de pie mirando al otro lado
+        t += 40
+        bucle._mira(cuerpo_lateral(mira=-1), ANCHO, ALTO, t)
+    bucle.enviar_comando({"nombre": "calibrar", "ejercicio": "knee_extension_seated", "lado": "der"})
+    bucle._atender_comandos()
+    bucle._controlador.actividad.vista_ok = True
+    sentado = sentado_sin_cara_ni_pie()
+    assert calcular_angulos(sentado, ANCHO, ALTO, mira=bucle._mira(sentado, ANCHO, ALTO, t))["rodilla_der"] < 0
+    for _ in range(50):  # 2 s sentado
+        t += 40
+        mira = bucle._mira(sentado, ANCHO, ALTO, t)
+    assert mira == 1
+    assert calcular_angulos(sentado, ANCHO, ALTO, mira=mira)["rodilla_der"] == pytest.approx(90, abs=0.5)

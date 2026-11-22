@@ -2,6 +2,8 @@
   "_fuente": "docs/reglas_rango_movimiento_miembro_inferior.md (Kapandji, 2012). Tolerancias, metas por defecto y umbrales de compensación son decisiones de diseño a validar con un fisioterapeuta.",
   "tolerancia_medicion": 10,
   "tolerancia_meta": 5,
+  "_fraccion_casi": "Decisión de diseño. Una repetición que no llegó a la meta cuenta como «casi» si hizo al menos esta fracción del recorrido, desde el inicio hasta la meta. Es una fracción, no grados, para valer igual en el tobillo que en la rodilla.",
+  "fraccion_casi": 0.75,
   "visibilidad_minima": 0.6,
   "salto_maximo": 30,
   "_rangos_referencia": "Tabla de la sección 2 de docs/reglas_rango_movimiento_miembro_inferior.md: rangos de una persona adulta sin patología (Kapandji, Fisiología articular, tomo 2, 6.ª ed., 2012) y valores clínicos de contraste. Son límites de referencia, no metas.",
@@ -88,7 +90,7 @@
       "meta_por_defecto": 15,
       "max_fisiologico": 30,
       "min_fisiologico": -50,
-      "compensacion": {"angulo": "rodilla", "max": 15, "mensaje": "Mantén la rodilla estirada"}
+      "compensacion": {"angulo": "rodilla", "max": 15, "mensaje": "Mantén la rodilla estirada"}, "talon_apoyado": {"elevacion_max": 0.15, "mensaje": "Deja el talón apoyado en el piso"}
     }
   }
 }

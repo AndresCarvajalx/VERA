@@ -3,14 +3,22 @@
 // todo se dibuja con los puntos que envía el servicio de visión.
 import { Ajustes } from "./ajustes.js";
 import { Escena3D } from "./escena3d.js";
-import { Flujo } from "./flujo.js";
+import { Encuesta } from "./encuesta.js";
+import { Estrellas } from "./estrellas.js";
+import { CELEBRACION, Flujo } from "./flujo.js";
 import { poseQuieta, poseSaludo } from "./guia.js";
+import { imprimirInformeTecnico } from "./informe.js";
+import { Logros } from "./logros.js";
 import { Manual } from "./manual.js";
 import { Mascotas } from "./mascotas.js";
 import { MiProgreso } from "./mi_progreso.js";
 import { dibujarProgreso } from "./progreso.js";
+import { sonido } from "./sonido.js";
+import { iniciarTema, temaActual } from "./tema.js";
 import { etapaPorAvance } from "./toribara.js";
+import { mostrarTutorial } from "./tutorial.js";
 import { Vitrina } from "./vitrina.js";
+import { voz } from "./voz.js";
 
 const CONEXIONES = [
   [11, 12], [11, 23], [12, 24], [23, 24],          // tronco
@@ -31,15 +39,31 @@ const GUIA = {
 };
 
 const $ = (id) => document.getElementById(id);
+// Con dos páginas abiertas las dos reciben los resultados: guarda solo la que pidió la actividad.
+const ID_PAGINA = Math.random().toString(36).slice(2);
 const latencias = [];
 const estado = {
   ejercicios: {}, jugador: null, progreso: [], plan: null, sesionId: null, pasoGuia: null, finActividad: 0,
-  jugarTrasCalibrar: false, latenciaSuma: 0, latenciaN: 0,
+  jugarTrasCalibrar: false, latenciaSuma: 0, latenciaN: 0, muestrasLatencia: [], fpsSuma: 0, fpsN: 0,
 };
 
-function color(nombre) {
-  return getComputedStyle(document.documentElement).getPropertyValue(nombre).trim();
+// Color de una variable del tema, ya resuelto (p. ej. un par light-dark() según dónde se use).
+// `donde`: el lienzo que lo va a usar; puede estar en una zona siempre oscura aunque la página sea clara.
+const coloresResueltos = new Map();
+function color(nombre, donde = document.body) {
+  let porNombre = coloresResueltos.get(donde);
+  if (!porNombre) coloresResueltos.set(donde, porNombre = { sonda: donde.appendChild(document.createElement("span")) });
+  if (!porNombre[nombre]) {
+    porNombre.sonda.hidden = true;
+    porNombre.sonda.style.color = `var(${nombre})`;
+    porNombre[nombre] = getComputedStyle(porNombre.sonda).color;
+  }
+  return porNombre[nombre];
 }
+function olvidarColores() {
+  for (const porNombre of coloresResueltos.values()) for (const n of Object.keys(porNombre)) if (n !== "sonda") delete porNombre[n];
+}
+window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", olvidarColores);
 
 // --- API de datos -------------------------------------------------------------
 async function api(metodo, url, cuerpo) {
@@ -73,11 +97,11 @@ function dibujar(msg, lienzo = $("lienzo")) {
   ctx.lineCap = "round";
   for (const [a, b] of CONEXIONES) {
     if (!visible(a) || !visible(b)) continue;
-    ctx.strokeStyle = MIEMBRO_INFERIOR.has(a) && MIEMBRO_INFERIOR.has(b) ? color("--acento") : color("--suave");
+    ctx.strokeStyle = MIEMBRO_INFERIOR.has(a) && MIEMBRO_INFERIOR.has(b) ? color("--acento", lienzo) : color("--suave", lienzo);
     ctx.beginPath(); ctx.moveTo(...p(a)); ctx.lineTo(...p(b)); ctx.stroke();
   }
   for (let i = 11; i < msg.landmarks.length; i++) {
-    ctx.fillStyle = visible(i) ? color("--texto") : color("--mal");
+    ctx.fillStyle = visible(i) ? color("--texto", lienzo) : color("--mal", lienzo);
     ctx.beginPath(); ctx.arc(...p(i), 5, 0, Math.PI * 2); ctx.fill();
   }
 }
@@ -94,21 +118,36 @@ function textoAviso(msg) {
   return `No se ve: ${partes.join(", ")}`;
 }
 
-function actualizarPanel(msg) {
-  const latencia = Date.now() - msg.t_captura; // t_render − t_captura (mismo reloj del equipo)
+/** Latencia (t_render − t_captura, mismo reloj del equipo) y FPS de cada fotograma dibujado. */
+function medirRendimiento(msg) {
+  const latencia = Date.now() - msg.t_captura;
   latencias.push(latencia);
   if (latencias.length > 30) latencias.shift();
   estado.latenciaSuma += latencia; estado.latenciaN += 1;
+  if (estado.muestrasLatencia.length < 20000) estado.muestrasLatencia.push(latencia);
+  if (msg.fps > 0) { estado.fpsSuma += msg.fps; estado.fpsN += 1; }
+}
+
+function rendimientoDeSesion() {
+  const m = [...estado.muestrasLatencia].sort((a, b) => a - b);
+  return {
+    latencia_promedio_ms: estado.latenciaN ? Math.round((estado.latenciaSuma / estado.latenciaN) * 10) / 10 : null,
+    latencia_p95_ms: m.length ? m[Math.min(m.length - 1, Math.floor(m.length * 0.95))] : null,
+    fps_promedio: estado.fpsN ? Math.round((estado.fpsSuma / estado.fpsN) * 10) / 10 : null,
+  };
+}
+
+function actualizarPanel(msg) {
   const lectura = lecturaEstable(`${$("ref_articulacion").value}_${$("ref_lado").value}`);
   $("ref_sistema").textContent = !lectura ? "– (no se ve la articulación)"
     : `${lectura.mediana.toFixed(1)}° ${lectura.desviacion <= 3 ? "· estable" : `· se mueve (±${lectura.desviacion.toFixed(1)}°)`}`;
   $("fps").textContent = msg.fps.toFixed(1);
   const lento = msg.fps > 0 && msg.fps < 15; // meta del OE4
-  $("fps").style.color = lento ? color("--mal") : "";
+  $("fps").style.color = lento ? "var(--mal)" : "";
   $("aviso_fps").classList.toggle("oculto", !lento);
   $("latencia").textContent = `${Math.round(latencias.reduce((a, b) => a + b, 0) / latencias.length)} ms`;
   $("encuadre").textContent = msg.encuadre_ok ? "OK" : "No";
-  $("encuadre").style.color = msg.encuadre_ok ? color("--ok") : color("--mal");
+  $("encuadre").style.color = msg.encuadre_ok ? "var(--ok)" : "var(--mal)";
   $("aviso").classList.toggle("oculto", msg.encuadre_ok);
   if (!msg.encuadre_ok) $("aviso").textContent = textoAviso(msg);
   for (const clave of ["cadera", "rodilla", "tobillo"].flatMap((a) => [`${a}_izq`, `${a}_der`])) {
@@ -158,7 +197,9 @@ function actualizarVista(msg, actividad) {
   const pierna = LADOS[actividad.lado];
   aviso.textContent = !msg.vista?.lateral
     ? `Ponte de lado, con tu pierna ${pierna} hacia la cámara`
-    : `Gírate: la cámara debe ver tu pierna ${pierna}`;
+    : msg.vista.lado_camara !== actividad.lado ? `Gírate: la cámara debe ver tu pierna ${pierna}`
+      : seleccion().regla?.posicion === "sentado" && !msg.vista.muslo_horizontal ? "Siéntate con el muslo horizontal"
+        : "¡Así! Quédate de perfil…";
 }
 
 const ESTADOS = {
@@ -358,6 +399,7 @@ async function elegirJugador(codigo) {
   estado.jugador = codigo || null;
   $("sel_jugador").value = codigo || "";
   estado.sesionId = null; // cada jugador tiene su propia sesión (y debe calibrar en ella)
+  Object.assign(estado, { latenciaSuma: 0, latenciaN: 0, muestrasLatencia: [], fpsSuma: 0, fpsN: 0 });
   $("jugador_actual").textContent = codigo ? `Jugador ${codigo}` : "Sin jugador";
   $("jugador_actual").className = codigo ? "chip ok" : "chip";
   if (codigo) recordar("jugador", codigo);
@@ -369,6 +411,49 @@ async function elegirJugador(codigo) {
   pintarProgreso();
   actualizarEjercicio();
   cargarPrecision().catch(() => {});
+  pintarEscenarios();
+}
+
+// --- escenarios desbloqueables -----------------------------------------------------------
+// Se ganan con los días jugados (no hace falta que sean seguidos): así nadie pierde lo ganado.
+const ESCENARIOS = [
+  { clave: "ciudad", nombre: "Ciudad de neón", dias: 0 },
+  { clave: "playa", nombre: "Playa al atardecer", dias: 3 },
+  { clave: "espacio", nombre: "Espacio", dias: 7 },
+];
+
+async function pintarEscenarios() {
+  let dias = 0;
+  if (estado.jugador) {
+    try { dias = (await logros.cargar(estado.jugador)).dias_jugados; } catch { /* sin datos: solo la ciudad */ }
+  }
+  const guardado = estado.jugador ? recuperar(`escenario_${estado.jugador}`) : null;
+  const elegido = ESCENARIOS.find((e) => e.clave === guardado && dias >= e.dias)?.clave ?? "ciudad";
+  escena.cambiarAmbiente(elegido);
+  $("selector_escenario").replaceChildren(...ESCENARIOS.map((e) => {
+    const libre = dias >= e.dias;
+    const b = Object.assign(document.createElement("button"), { type: "button", className: `escenario escenario-${e.clave}` });
+    b.setAttribute("role", "radio");
+    b.setAttribute("aria-checked", String(e.clave === elegido));
+    b.disabled = !libre;
+    b.append(Object.assign(document.createElement("span"), { className: "muestra-escenario", ariaHidden: "true" }),
+      Object.assign(document.createElement("strong"), { textContent: e.nombre }),
+      Object.assign(document.createElement("small"), {
+        textContent: libre ? (e.dias ? `Desbloqueado: ${e.dias} días jugados` : "Disponible desde el inicio")
+          : `Juega ${e.dias} días para desbloquearlo (llevas ${dias})`,
+      }));
+    if (!libre) {
+      const candado = Object.assign(document.createElement("span"), { className: "icono" });
+      candado.dataset.icono = "candado";
+      candado.setAttribute("aria-hidden", "true");
+      b.prepend(candado);
+    }
+    b.addEventListener("click", () => {
+      if (estado.jugador) recordar(`escenario_${estado.jugador}`, e.clave);
+      pintarEscenarios();
+    });
+    return b;
+  }));
 }
 
 // --- personaje elegible --------------------------------------------------------
@@ -465,6 +550,7 @@ function mostrarEtapasPierna() {
 }
 
 async function guardarResumen(resumen) {
+  if (resumen.cliente !== ID_PAGINA) return false;
   if (!estado.jugador) {
     mostrarMensaje("No hay jugador elegido: este resultado no se guardó.", "mal");
     return;
@@ -472,6 +558,7 @@ async function guardarResumen(resumen) {
   try {
     await asegurarSesion();
     await api("POST", `/sesiones/${estado.sesionId}/resultados`, resumen);
+    api("PATCH", `/sesiones/${estado.sesionId}`, { ...rendimientoDeSesion(), terminar: false }).catch(() => {});
     await cargarProgreso();
     await cargarPlan();
     return true;
@@ -487,10 +574,9 @@ async function asegurarSesion() {
 
 function cerrarSesion() {
   if (!estado.sesionId || !estado.jugador) return;
-  const latencia = estado.latenciaN ? estado.latenciaSuma / estado.latenciaN : null;
   fetch(`/api/sesiones/${estado.sesionId}`, {
     method: "PATCH", keepalive: true, headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ latencia_promedio_ms: latencia }),
+    body: JSON.stringify(rendimientoDeSesion()),
   });
 }
 
@@ -499,7 +585,7 @@ let ws = null;
 let ultimo = null;
 
 function enviar(nombre, datos = {}) {
-  if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ tipo: "comando", nombre, ...datos }));
+  if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ tipo: "comando", nombre, cliente: ID_PAGINA, ...datos }));
   else mostrarMensaje("Sin conexión con el servicio de visión.", "mal");
 }
 
@@ -510,7 +596,8 @@ function requiereJugador() {
 }
 
 const escena = new Escena3D($("escena3d"));
-const mascotas = new Mascotas($("mascotas"), $("globo"), ["persona", "toribara", "conejibara"]);
+const estrellas = new Estrellas($("estrellas"));
+const mascotas = new Mascotas($("mascotas"), $("globo"), ["persona", "mujer", "toribara", "conejibara"]);
 const ajustes = new Ajustes(api, dibujar);
 const miProgreso = new MiProgreso(api, elegirJugador, $("tooltip"));
 let manual = null; // se crea cuando llega el catálogo de ejercicios
@@ -519,8 +606,17 @@ let manual = null; // se crea cuando llega el catálogo de ejercicios
 // Solo la pantalla visible dibuja en 3D: cada una tiene su propio lienzo WebGL.
 let pantallaActual = "menu";
 
+const logros = new Logros(api);
+const encuesta = new Encuesta(api);
 const flujo = new Flujo({
-  enviar, dibujar, textoAviso, recordar, recuperar, mostrarGuia, guardarResumen, cargarPlan,
+  enviar, dibujar, textoAviso, recordar, recuperar, mostrarGuia, guardarResumen, cargarPlan, logros, encuesta,
+  demostrar: (ejercicio) => escena.mostrarEjercicio(ejercicio),
+  // La primera vez de cada jugador (en este navegador) se muestra el tutorial antes de empezar.
+  tutorial: async (jugador) => {
+    if (recuperar(`tutorial_${jugador}`)) return;
+    await mostrarTutorial();
+    recordar(`tutorial_${jugador}`, "1");
+  },
   ejercicios: () => estado.ejercicios,
   progreso: () => estado.progreso,
   elegirEjercicio: (clave, lado) => {
@@ -531,13 +627,76 @@ const flujo = new Flujo({
   irA: (pantalla) => mostrarPantalla(pantalla),
 });
 
+// --- sonido --------------------------------------------------------------------------
+function pintarSonido() {
+  const b = $("btn_sonido");
+  b.setAttribute("aria-pressed", String(sonido.silencio));
+  b.setAttribute("aria-label", sonido.silencio ? "Activar el sonido" : "Silenciar");
+  b.title = b.getAttribute("aria-label");
+}
+$("btn_sonido").addEventListener("click", () => {
+  sonido.fijarSilencio(!sonido.silencio);
+  if (sonido.silencio) voz.callar();
+  pintarSonido();
+});
+for (const [id, tipo] of [["vol_musica", "musica"], ["vol_efectos", "efectos"]]) {
+  $(id).value = Math.round(sonido.volumen[tipo] * 100);
+  $(id).addEventListener("input", (e) => sonido.fijarVolumen(tipo, e.target.value / 100));
+}
+$("vol_efectos").addEventListener("change", () => sonido.efecto("bien"));
+$("probar_sonidos").addEventListener("click", (e) => {
+  const efecto = e.target.dataset?.efecto;
+  if (efecto) sonido.efecto(efecto);
+});
+pintarSonido();
+$("voz_activa").checked = voz.activa;
+$("voz_activa").disabled = !voz.disponible;
+$("voz_activa").addEventListener("change", (e) => voz.fijar(e.target.checked));
+$("btn_ver_tutorial").addEventListener("click", () => mostrarTutorial());
+$("btn_informe_tecnico").addEventListener("click", async (e) => {
+  e.target.disabled = true;
+  try { imprimirInformeTecnico(await api("GET", "/indicadores")); }
+  catch (error) { mostrarMensaje(`No se pudo armar el informe: ${error.message}`, "mal"); }
+  finally { e.target.disabled = false; }
+});
+$("probar_voz").addEventListener("click", () => voz.decir("¡Hola! Así te voy a guiar durante la sesión.", { forzar: true }));
+$("voz_nombre").addEventListener("change", (e) => {
+  voz.elegir(e.target.value || null);
+  voz.decir("Esta es la voz que te va a guiar.", { forzar: true });
+});
+// Lista de voces en español: llega tarde (sobre todo las de la nube) y cambia según el navegador.
+voz.alCambiar(() => {
+  const hay = voz.voces.length > 0;
+  $("voz_nombre").replaceChildren(new Option("Automática (la de mejor calidad)", ""),
+    ...voz.voces.map((v) => new Option(`${v.name} · ${v.lang}`, v.name)));
+  $("voz_nombre").value = recuperar("voz_nombre") ?? "";
+  $("voz_nombre").disabled = !hay;
+  $("probar_voz").disabled = !hay;
+  $("voz_activa").disabled = !hay;
+  $("voz_nota").textContent = !voz.disponible ? "Este navegador no puede leer en voz alta."
+    : hay ? (/natural|online|google/i.test(voz.nombre) ? "" : "Para una voz más natural, abre VERA en Microsoft Edge: trae voces en español de mejor calidad.")
+      : "Este equipo no tiene ninguna voz en español, así que la voz está apagada. Abre VERA en Microsoft Edge (trae voces en español) o instala una en Windows: Configuración → Hora e idioma → Voz → Agregar voces → Español.";
+});
+
+/** Estrellas y mascotas: solo en el tema actual; el profesional no lleva adornos. */
+function adornar() {
+  const sobrio = temaActual() === "profesional";
+  const enEjercicio = pantallaActual === "sesion" || pantallaActual === "juego";
+  estrellas.modo(sobrio || enEjercicio ? "quieto" : pantallaActual === "menu" ? "menu" : "calmo");
+  mascotas.activar(pantallaActual === "menu" && !sobrio);
+}
+document.addEventListener("tema", () => { olvidarColores(); adornar(); escena.cambiarTema(temaActual() === "profesional"); });
+iniciarTema();
+if (temaActual() === "profesional") escena.cambiarTema(true);
+
 function mostrarPantalla(nombre) {
   // La sesión guiada y el panel necesitan jugador (ahí se guarda todo).
   if ((nombre === "sesion" || nombre === "juego") && !estado.jugador) nombre = "personaje";
   if (pantallaActual === "sesion" && nombre !== "sesion") flujo.salir();
   pantallaActual = nombre;
+  sonido.musica(nombre === "sesion" || nombre === "juego" ? "ejercicio" : "menu");
+  adornar();
   for (const p of document.querySelectorAll(".pantalla")) p.classList.toggle("activa", p.id === `pantalla_${nombre}`);
-  mascotas.activar(nombre === "menu");
   for (const v of vitrinas.values()) v.activar(nombre === "personaje");
   // Una sola escena 3D: se muestra en la sesión guiada o en el panel del fisioterapeuta.
   if (nombre === "sesion") escena.moverA($("escena_sesion"));
@@ -549,6 +708,7 @@ function mostrarPantalla(nombre) {
   else manual?.ocultar();
   if (nombre === "ajustes") ajustes.mostrar();
   if (nombre === "progreso") miProgreso.mostrar(estado.jugador);
+  if (nombre !== "sesion") voz.callar();
   window.scrollTo(0, 0);
 }
 
@@ -651,16 +811,12 @@ async function manejarEvento(msg) {
     case "fuera_de_rango":
       mostrarMensaje(msg.mensaje, "mal");
       break;
-    case "rep_valida": {
-      // Superar la meta (no solo entrar en la tolerancia) se celebra como "perfecto".
-      const plan = estado.plan;
-      const supero = plan && (plan.direccion === "arriba" ? msg.angulo_pico >= plan.meta : msg.angulo_pico <= plan.meta);
-      celebrar(supero ? "¡PERFECTO!" : "¡BIEN!", supero ? "perfecto" : "bien");
+    case "rep_valida":
+      celebrar(...CELEBRACION[msg.calidad]);
       mostrarMensaje(`¡Repetición ${msg.numero} válida! Llegaste a ${msg.angulo_pico}°`, "ok");
       break;
-    }
     case "rep_incompleta":
-      celebrar("¡CASI!", "casi");
+      celebrar(...CELEBRACION[msg.calidad]);
       mostrarMensaje(`Repetición incompleta (${MOTIVOS_REP[msg.motivo] ?? msg.motivo}): llegaste a ${msg.angulo_pico}°. ¡Sigue!`);
       break;
     case "reposo_listo":
@@ -756,9 +912,11 @@ function conectar() {
           if (pantallaActual === "juego") {
             dibujar(ultimo);
             escena.actualizarJugador(ultimo);
+            medirRendimiento(ultimo);
             actualizarPanel(ultimo);
           } else if (pantallaActual === "sesion") {
             escena.actualizarJugador(ultimo);
+            medirRendimiento(ultimo);
             flujo.fotograma(ultimo);
           } else if (pantallaActual === "ajustes") {
             ajustes.fotograma(ultimo);
@@ -767,6 +925,9 @@ function conectar() {
         });
       }
     } else if (msg.tipo === "evento") {
+      sonido.evento(msg);
+      if (msg.calidad) escena.celebrar(msg.calidad);
+      else if (msg.nombre === "serie_completa") escena.celebrar("serie");
       if (pantallaActual === "sesion") {
         registrarEvento(msg);
         if (FIN_DE_ACTIVIDAD.has(msg.nombre)) estado.finActividad = msg.t;
@@ -778,7 +939,17 @@ function conectar() {
   };
 }
 
+/** Quita la pantalla de carga cuando el personaje del juego está listo (o a los 8 s, pase lo que pase). */
+function terminarCarga() {
+  const listo = Promise.allSettled([escena.listo, document.fonts.ready]);
+  Promise.race([listo, new Promise((r) => setTimeout(r, 8000))]).then(() => {
+    $("carga").classList.add("oculta");
+    setTimeout(() => $("carga").remove(), 700);
+  });
+}
+
 async function iniciar() {
+  terminarCarga();
   mostrarPantalla("menu");
   mascotas.cargar().catch((e) => console.warn("No se pudieron cargar las mascotas del menú", e));
   setInterval(() => { $("fase_guia").textContent = escena.faseGuia || "–"; }, 200);
@@ -793,6 +964,7 @@ async function iniciar() {
     marcarPersonaje(recuperar("personaje") ?? PERSONAJE_POR_DEFECTO); // hasta que se elija jugador
     actualizarEjercicio();
     await cargarJugadores();
+    pintarEscenarios();
   } catch (e) {
     mostrarMensaje(`No se pudo cargar la API de datos: ${e.message}`, "mal");
   }

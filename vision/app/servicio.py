@@ -23,7 +23,8 @@ from .captura import BucleCaptura, es_url_de_camara, listar_camaras
 from .estimador import EstimadorMediaPipe
 
 RAIZ = Path(__file__).resolve().parents[2]
-MODELO = RAIZ / "vision" / "models" / "pose_landmarker_full.task"
+# MODELO_POSE=lite (más rápido), full (por defecto) o heavy (más preciso; hay que descargarlo).
+MODELO = RAIZ / "vision" / "models" / f"pose_landmarker_{os.environ.get('MODELO_POSE', 'full')}.task"
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("servicio")

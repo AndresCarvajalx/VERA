@@ -4,6 +4,8 @@ Los ángulos siguen la sección 4 de docs/reglas_rango_movimiento_miembro_inferi
 son ángulos clínicos (0° = posición anatómica de referencia), no el ángulo interno
 entre segmentos.
 """
+import math
+
 from .estimador import Landmark
 from .geometria import a_pixeles, angulo_vectores, cruz
 from .reglas import cargar
@@ -25,6 +27,9 @@ UMBRAL_VISIBILIDAD = cargar().visibilidad_minima
 MARGEN_IMAGEN = 0.02
 # De lado, la distancia horizontal entre hombros (o caderas) es pequeña frente al largo del tronco.
 RAZON_MAXIMA_LATERAL = 0.35
+# Muslo "horizontal": a más de ~56° de la vertical y lo bastante largo en la imagen para confiar en él.
+MUSLO_HORIZONTAL = 1.5
+MUSLO_MINIMO_PX = 20
 
 
 def _visible(p: Landmark, umbral: float) -> bool:
@@ -56,6 +61,19 @@ def encuadre_ok(lms: list[Landmark], lado: str | None = None, umbral: float = UM
     return not puntos_faltantes(lms, lado, umbral)
 
 
+def altura_talon(lms: list[Landmark], lado: str, ancho: int, alto: int,
+                 umbral: float = UMBRAL_VISIBILIDAD) -> float | None:
+    """Posición vertical del talón en la imagen (mayor = más abajo), en largos de pierna.
+
+    Se divide por el largo de rodilla a tobillo para que no dependa de la distancia a la cámara.
+    """
+    rodilla, tobillo, talon = (lms[INDICES[f"{p}_{lado}"]] for p in ("rodilla", "tobillo", "talon"))
+    if min(rodilla.visibilidad, tobillo.visibilidad, talon.visibilidad) < umbral:
+        return None
+    largo = math.hypot((rodilla.x - tobillo.x) * ancho, (rodilla.y - tobillo.y) * alto)
+    return round(talon.y * alto / largo, 3) if largo >= 1 else None
+
+
 def vista(lms: list[Landmark], ancho: int, alto: int) -> dict:
     """¿La cámara ve al jugador de lado? ¿Qué lado está hacia la cámara?"""
     px = lambda nombre: a_pixeles(lms[INDICES[nombre]].x, lms[INDICES[nombre]].y, ancho, alto)
@@ -70,15 +88,37 @@ def vista(lms: list[Landmark], ancho: int, alto: int) -> dict:
         "lateral": razon <= RAZON_MAXIMA_LATERAL,
         "lado_camara": "izq" if z("izq") < z("der") else "der",
         "razon": round(razon, 2),
+        "muslo_horizontal": muslo_hacia_adelante(lms, ancho, alto) is not None,
+        "talon": {lado: altura_talon(lms, lado, ancho, alto) for lado in ("izq", "der")},
     }
 
 
-def hacia_donde_mira(lms: list[Landmark], ancho: int, umbral: float = UMBRAL_VISIBILIDAD) -> int | None:
+def muslo_hacia_adelante(lms: list[Landmark], ancho: int, alto: int, umbral: float = UMBRAL_VISIBILIDAD) -> int | None:
+    """Con el muslo casi horizontal (sentado o con la rodilla arriba), la rodilla va adelante de la
+    cadera: +1 si apunta a la derecha de la imagen, −1 a la izquierda, None si el muslo no lo dice.
+
+    Es la señal más confiable: la cadera no llega a esa posición hacia atrás.
+    """
+    senales = set()
+    for lado in LADOS:
+        cadera, rodilla = lms[INDICES[f"cadera_{lado}"]], lms[INDICES[f"rodilla_{lado}"]]
+        if cadera.visibilidad >= umbral and rodilla.visibilidad >= umbral:
+            dx, dy = (rodilla.x - cadera.x) * ancho, (rodilla.y - cadera.y) * alto
+            if abs(dx) >= MUSLO_MINIMO_PX and abs(dx) > MUSLO_HORIZONTAL * abs(dy):
+                senales.add(1 if dx > 0 else -1)
+    return senales.pop() if len(senales) == 1 else None
+
+
+def hacia_donde_mira(lms: list[Landmark], ancho: int, alto: int, umbral: float = UMBRAL_VISIBILIDAD) -> int | None:
     """+1 si el jugador mira hacia la derecha de la imagen, −1 hacia la izquierda, None si no se sabe.
 
-    Se usa la nariz respecto a las orejas: de perfil siempre apunta hacia adelante. El pie
+    Se usa el muslo si está horizontal (sentado se suele girar la cabeza hacia la pantalla) y si no,
+    la nariz respecto a las orejas: de perfil siempre apunta hacia adelante. El pie
     no sirve como referencia principal porque al doblar la rodilla más de 90° apunta hacia atrás.
     """
+    muslo = muslo_hacia_adelante(lms, ancho, alto, umbral)
+    if muslo is not None:
+        return muslo
     senales = set()
     nariz = lms[NARIZ]
     orejas = [lms[i] for i in OREJAS if lms[i].visibilidad >= umbral]
@@ -117,7 +157,7 @@ def calcular_angulos(lms: list[Landmark], ancho: int, alto: int, umbral: float =
     """
     angulos: dict[str, float | None] = {}
     if mira is AUTOMATICO:
-        mira = hacia_donde_mira(lms, ancho, umbral)
+        mira = hacia_donde_mira(lms, ancho, alto, umbral)
     for lado in LADOS:
         p = {parte: lms[INDICES[f"{parte}_{lado}"]] for parte in PARTES}
         v = {parte: punto.visibilidad >= umbral for parte, punto in p.items()}

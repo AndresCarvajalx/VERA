@@ -2,6 +2,8 @@
 // (GET /api/pacientes/<código>/diario). Una sola medida por gráfica: las columnas son el tiempo
 // jugado por día y las tarjetas de progreso.js, el rango calibrado de cada día. El color no
 // distingue series (cada gráfica tiene una), y todo lo del tooltip también está en las tablas.
+import { imprimirInforme } from "./informe.js";
+import { Logros } from "./logros.js";
 import { dibujarProgreso, formatoDia } from "./progreso.js";
 
 const $ = (id) => document.getElementById(id);
@@ -59,6 +61,7 @@ export class MiProgreso {
    *  @param {HTMLElement} tooltip */
   constructor(api, elegirJugador, tooltip) {
     this.api = api;
+    this.logros = new Logros(api);
     this.tooltip = tooltip;
     this.jugador = null;
     this.datos = null;
@@ -75,6 +78,7 @@ export class MiProgreso {
       this.mostrar(e.target.value || null);
     });
     $("btn_descargar_progreso").addEventListener("click", () => this._descargar());
+    $("btn_informe_progreso").addEventListener("click", () => this._informe());
     new ResizeObserver(() => {
       const ancho = $("grafica_tiempo").clientWidth;
       if (ancho && ancho !== this._anchoDibujado && this.datos) this._graficaTiempo();
@@ -89,6 +93,8 @@ export class MiProgreso {
     if (jugador) {
       try {
         this.datos = await this.api("GET", `/pacientes/${encodeURIComponent(jugador)}/diario`);
+        this.datosLogros = null;
+        this.logros.cargar(jugador).then((l) => { this.datosLogros = l; this.logros.pintar(l); }).catch(() => {});
       } catch (e) {
         this._vacio(`No se pudo leer el progreso: ${e.message}`);
         return;
@@ -102,6 +108,7 @@ export class MiProgreso {
     $("progreso_mensaje").classList.remove("oculto");
     $("contenido_progreso").classList.add("oculto");
     $("btn_descargar_progreso").disabled = true;
+    $("btn_informe_progreso").disabled = true;
   }
 
   _pintar() {
@@ -114,6 +121,7 @@ export class MiProgreso {
     $("progreso_mensaje").classList.add("oculto");
     $("contenido_progreso").classList.remove("oculto");
     $("btn_descargar_progreso").disabled = false;
+    $("btn_informe_progreso").disabled = false;
 
     const hoy = aDia(new Date());
     this.desde = this.periodo ? sumarDias(hoy, 1 - this.periodo) : this.datos.dias[0].dia;
@@ -222,19 +230,32 @@ export class MiProgreso {
     $("tabla_dias").replaceChildren(...filas);
   }
 
-  /** Una tarjeta por ejercicio y pierna: el rango de cada día del periodo y cuánto ganó en él. */
-  _mejoria() {
-    const series = this.datos.series.map((serie) => {
+  /** Series del periodo elegido, con su primera y última medición dentro de él. */
+  _seriesDelPeriodo() {
+    return this.datos.series.map((serie) => {
       const puntos = serie.puntos.filter((p) => p.dia >= this.desde);
       if (!puntos.length) return null;
       const signo = serie.direccion === "arriba" ? 1 : -1;
       const inicial = puntos[0], ultimo = puntos.at(-1);
       return { ...serie, puntos, inicial, ultimo, mejora: Math.round(signo * (ultimo.mejor - inicial.mejor) * 10) / 10 };
     }).filter(Boolean);
+  }
+
+  /** Una tarjeta por ejercicio y pierna: el rango de cada día del periodo y cuánto ganó en él. */
+  _mejoria() {
+    const series = this._seriesDelPeriodo();
     $("mejoria_vacia").classList.toggle("oculto", series.length > 0);
     dibujarProgreso($("tarjetas_diarias"), series, this.tooltip, {
       porDia: true,
       desde: this.periodo ? `en los últimos ${this.periodo} días` : "desde tu primera calibración",
+    });
+  }
+
+  /** Informe del periodo elegido, para guardar como PDF (web/informe.js). */
+  _informe() {
+    imprimirInforme({
+      jugador: this.jugador, dias: this.diasPeriodo, series: this._seriesDelPeriodo(), logros: this.datosLogros,
+      desde: this.desde, hasta: this.hoy, periodo: this.periodo ? `últimos ${this.periodo} días` : "todo el historial",
     });
   }
 

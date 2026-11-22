@@ -15,6 +15,7 @@ calcula a partir de la calibración (api/adaptacion.py).
 
 Reglas: config/reglas_rom.json (ver docs/reglas_rango_movimiento_miembro_inferior.md).
 """
+from collections import deque
 from dataclasses import dataclass, field
 
 from .calibracion import Calibracion
@@ -28,6 +29,13 @@ REPETICIONES_SEGUIDAS_RESINCRONIZAR = 3  # fotogramas coherentes tras un salto p
 
 
 MAX_HUECO_MS = 1000
+# Sentado, la rodilla se mide mal si el jugador se gira hacia la cámara: el muslo se ve acortado
+# (caso real: 36° de reposo con la rodilla a unos 90°). Se vigila la vista durante toda la medición,
+# con un límite más holgado que el de entrada para no interrumpir por una lectura suelta.
+RAZON_MAXIMA_SENTADO = 0.5
+FUERA_DE_VISTA_MS = 1000
+TALON_FOTOGRAMAS = 4  # lecturas seguidas que deben coincidir antes de aceptar un cambio del talón
+TALON_NUEVO_PISO_MS = 5000
 
 
 class ComandoInvalido(Exception):
@@ -62,6 +70,41 @@ class FiltroSaltos:
         return None
 
 
+class VigiaTalon:
+    """Dice si el jugador levantó el talón: al subir toda la pierna el tobillo también cambia de ángulo.
+
+    El piso es el punto más bajo que ha tocado el talón en esta actividad. Una lectura suelta no
+    mueve el piso ni cuenta como levantar el pie. Si el talón sigue arriba mucho tiempo, el jugador
+    probablemente se movió en el encuadre: ese es el piso nuevo, para no dejarlo bloqueado.
+    """
+
+    def __init__(self, elevacion_max: float) -> None:
+        self.elevacion_max = elevacion_max
+        self.piso: float | None = None
+        self._recientes: deque[float] = deque(maxlen=TALON_FOTOGRAMAS)
+        self._arriba_desde: int | None = None
+
+    def levantado(self, t_ms: int, altura: float | None) -> bool:
+        if altura is None:
+            return False
+        self._recientes.append(altura)
+        if len(self._recientes) < TALON_FOTOGRAMAS:
+            return False
+        if self.piso is None:
+            self.piso = min(self._recientes)
+        # min: todo el grupo tiene que estar más abajo para mover el piso. max: todo más arriba para avisar.
+        self.piso = max(self.piso, min(self._recientes))
+        if self.piso - max(self._recientes) <= self.elevacion_max:
+            self._arriba_desde = None
+            return False
+        if self._arriba_desde is None:
+            self._arriba_desde = t_ms
+        elif t_ms - self._arriba_desde >= TALON_NUEVO_PISO_MS:
+            self.piso, self._arriba_desde = min(self._recientes), None
+            return False
+        return True
+
+
 @dataclass
 class Actividad:
     """Lo que se está haciendo: una calibración o un ejercicio del juego."""
@@ -75,10 +118,14 @@ class Actividad:
     calibracion: Calibracion | None = None
     vista_desde: int | None = None
     vista_ok: bool = False
+    fuera_de_vista_desde: int | None = None
+    cliente: str | None = None  # la página que la pidió: es la única que guarda el resultado
     t_inicio: int | None = None
     angulos: list[float] = field(default_factory=list)  # válidos y sin compensación
     compensaciones: int = 0
     compensando: bool = False
+    motivo_compensacion: str | None = None
+    talon: VigiaTalon | None = None
     fuera_de_rango: bool = False
     fps: list[float] = field(default_factory=list)
     activo_ms: int = 0  # tiempo realmente en movimiento: sin pausas ni la espera de ponerse de lado
@@ -163,7 +210,7 @@ class Controlador:
                 filtro = FiltroSaltos(self.reglas.salto_maximo)
                 if nombre == "calibrar":
                     signo = 1 if regla.direccion == "arriba" else -1
-                    self.actividad = Actividad("calibracion", regla, lado, filtro,
+                    self.actividad = Actividad("calibracion", regla, lado, filtro, cliente=datos.get("cliente"),
                                                calibracion=Calibracion(self.reglas.calibracion, signo))
                 else:
                     meta = _numero(datos, "meta", -180, 180, regla.meta_por_defecto)
@@ -178,7 +225,7 @@ class Controlador:
                     contador = crear_contador(
                         regla, meta, int(_numero(datos, "tiempo_sostenido_ms", 0, 30000, 0)), reposo)
                     self.actividad = Actividad(
-                        "juego", regla, lado, filtro, meta=meta,
+                        "juego", regla, lado, filtro, meta=meta, cliente=datos.get("cliente"),
                         repeticiones_meta=int(_numero(datos, "repeticiones", 1, 50, 10)), contador=contador)
                 self.pausado = False
                 return eventos
@@ -206,6 +253,9 @@ class Controlador:
         # 1. Orientación: de lado y con la pierna medida hacia la cámara (regla 4).
         if not act.vista_ok:
             correcta = bool(vista and vista["lateral"] and vista["lado_camara"] == act.lado)
+            if act.regla.posicion == "sentado":
+                # También confirma que ya se sentó: de pie el reposo saldría cerca de 0°.
+                correcta = correcta and vista["muslo_horizontal"]
             if not correcta:
                 act.vista_desde = None
             elif act.vista_desde is None:
@@ -213,6 +263,14 @@ class Controlador:
             elif t_ms - act.vista_desde >= VISTA_ESTABLE_MS:
                 act.vista_ok, act.t_inicio = True, t_ms
                 eventos.append({"nombre": "vista_ok", "lado": act.lado})
+        elif act.regla.posicion == "sentado":
+            if vista and vista["razon"] <= RAZON_MAXIMA_SENTADO and vista["muslo_horizontal"]:
+                act.fuera_de_vista_desde = None
+            elif act.fuera_de_vista_desde is None:
+                act.fuera_de_vista_desde = t_ms
+            elif t_ms - act.fuera_de_vista_desde >= FUERA_DE_VISTA_MS:
+                act.vista_ok, act.vista_desde, act.fuera_de_vista_desde = False, None, None
+                eventos.append({"nombre": "vista_perdida", "lado": act.lado})
 
         # 2. Ángulo medido y validaciones de la regla 5.
         regla, tol = act.regla, self.reglas.tolerancia_medicion
@@ -224,14 +282,21 @@ class Controlador:
         act.fuera_de_rango = fuera
         angulo = act.filtro.aplicar(None if fuera else angulo)
 
-        compensando = False
+        motivo = None
         if regla.compensacion and angulo is not None:
             otro = angulos.get(f"{regla.compensacion.angulo}_{act.lado}")
-            compensando = otro is not None and otro > regla.compensacion.maximo
-            if compensando and not act.compensando and act.vista_ok:
-                act.compensaciones += 1
-                eventos.append({"nombre": "compensacion", "mensaje": regla.compensacion.mensaje})
-        act.compensando = compensando
+            if otro is not None and otro > regla.compensacion.maximo:
+                motivo = regla.compensacion.mensaje
+        if regla.talon_apoyado and act.vista_ok:
+            act.talon = act.talon or VigiaTalon(regla.talon_apoyado.elevacion_max)
+            # El talón se vigila aunque se pierda el ángulo: con el pie en el aire el tobillo se lee mal.
+            if act.talon.levantado(t_ms, (vista or {}).get("talon", {}).get(act.lado)):
+                motivo = regla.talon_apoyado.mensaje
+        compensando = motivo is not None
+        if compensando and motivo != act.motivo_compensacion and act.vista_ok:
+            act.compensaciones += 1
+            eventos.append({"nombre": "compensacion", "mensaje": motivo})
+        act.compensando, act.motivo_compensacion = compensando, motivo
 
         activo = act.vista_ok and not self.pausado
         if activo:
@@ -269,7 +334,8 @@ class Controlador:
             if resultado:
                 rep = act.contador.repeticiones[-1]
                 eventos.append({"nombre": resultado, "numero": rep.numero, "angulo_pico": rep.angulo_pico,
-                                "sostenido_ms": rep.sostenido_ms, "motivo": rep.motivo})
+                                "sostenido_ms": rep.sostenido_ms, "motivo": rep.motivo,
+                                "calidad": act.contador.calidad(rep, act.meta, self.reglas.fraccion_casi)})
         c = act.contador
         extra = {"rep": {
             **self._comun(act, angulo, activo),
@@ -304,7 +370,7 @@ class Controlador:
             "angulo": angulo,
             "mejor": act.mejor(),
             "max_fisiologico": act.regla.max_fisiologico,
-            "compensacion": act.regla.compensacion.mensaje if act.compensando and act.regla.compensacion else None,
+            "compensacion": act.motivo_compensacion,
             "fuera_de_rango": act.fuera_de_rango,
         }
 
@@ -328,6 +394,7 @@ class Controlador:
             "fps_promedio": round(sum(act.fps) / len(act.fps), 1) if act.fps else None,
             "completo": nombre in ("calibracion_lista", "serie_completa"),
             "duracion_s": round(act.activo_ms / 1000, 1),
+            "cliente": act.cliente,
         }
         if act.calibracion:
             # El rango calibrado sale de los intentos, no de los extremos sueltos de los fotogramas.
